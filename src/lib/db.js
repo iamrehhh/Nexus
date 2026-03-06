@@ -147,3 +147,63 @@ export async function getUsageStats() {
 
   return stats
 }
+
+// ── Memory ─────────────────────────────────────────────────────
+export async function loadMemory(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('user_memory')
+    .select('*')
+    .eq('uid', uid)
+    .eq('personalityId', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') throw error
+  return data || null
+}
+
+export async function saveMemory(uid, personalityId, facts, lastExtractedAt) {
+  const { error } = await supabase
+    .from('user_memory')
+    .upsert([{ uid, personalityId, facts, lastExtractedAt, updatedAt: new Date().toISOString() }],
+      { onConflict: 'uid,personalityId' })
+  if (error) throw error
+}
+
+// ── User Profile ───────────────────────────────────────────────
+export async function loadProfile(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('user_profile')
+    .select('*')
+    .eq('uid', uid)
+    .eq('personalityId', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') throw error
+  return data || null
+}
+
+export async function saveProfile(uid, personalityId, profile, lastAnalyzedAt) {
+  const { error } = await supabase
+    .from('user_profile')
+    .upsert([{ uid, personalityId, profile, lastAnalyzedAt, updatedAt: new Date().toISOString() }],
+      { onConflict: 'uid,personalityId' })
+  if (error) throw error
+}
+
+// ── Engagement State ───────────────────────────────────────────
+export async function loadEngagement(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('engagement_state')
+    .select('*')
+    .eq('uid', uid)
+    .eq('personalityId', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') throw error
+  return data || null
+}
+
+export async function saveEngagement(uid, personalityId, state) {
+  const { error } = await supabase
+    .from('engagement_state')
+    .upsert([{ uid, personalityId, ...state, updatedAt: new Date().toISOString() }],
+      { onConflict: 'uid,personalityId' })
+  if (error) throw error
+}
