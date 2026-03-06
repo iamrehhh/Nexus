@@ -53,10 +53,13 @@ html, body, #root {
   font-family: 'DM Sans', sans-serif;
   background: var(--bg);
   color: var(--text);
-  transition: background 0.3s, color 0.3s;
+  transition: background 0.4s ease, color 0.4s ease;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-body { overflow: hidden; }
+body { overflow-x: hidden; }
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 4px; }
