@@ -1,88 +1,149 @@
-import { db } from './firebase'
-import {
-  collection, doc, getDoc, setDoc, addDoc, updateDoc,
-  query, orderBy, limit, getDocs, serverTimestamp,
-  deleteDoc, where
-} from 'firebase/firestore'
+import { supabase } from './supabase'
 
 // ── Users ──────────────────────────────────────────────────────
 export async function ensureUser(user) {
-  const ref = doc(db, 'users', user.uid)
-  const snap = await getDoc(ref)
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      uid: user.uid,
-      name: user.displayName,
+  const { data: existingUser, error: checkError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', user.id)
+    .single()
+
+  if (checkError && checkError.code !== 'PGRST116') {
+    console.error("Error checking user:", checkError)
+    throw checkError
+  }
+
+  if (!existingUser) {
+    const newUser = {
+      id: user.id,
+      name: user.user_metadata?.full_name || user.email,
       email: user.email,
-      photo: user.photoURL,
+      photo: user.user_metadata?.avatar_url || '',
       role: 'user',
-      createdAt: serverTimestamp(),
       activePersonalityId: 'elena',
       theme: 'dark'
-    })
+    }
+
+    // Using simple keys as we'll map them from frontend if needed, 
+    // but assuming Postgres case-insensitivity mapping
+    // If the database has "activePersonalityId" we must write it like that if using double quotes in SQL
+    // It's safer to pass exactly what the payload expects
+    const { data: insertedUser, error } = await supabase
+      .from('users')
+      .insert([newUser])
+      .select()
+      .single()
+
+    if (error) throw error
+    return insertedUser
   }
-  return (await getDoc(ref)).data()
+  return existingUser
 }
 
 export async function updateUserSettings(uid, data) {
-  await updateDoc(doc(db, 'users', uid), data)
+  const { error } = await supabase
+    .from('users')
+    .update(data)
+    .eq('id', uid)
+  if (error) throw error
 }
 
 export async function getAllUsers() {
-  const snap = await getDocs(collection(db, 'users'))
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+  if (error) throw error
+  return data || []
 }
 
 // ── Chat History ───────────────────────────────────────────────
 export async function saveMessage(uid, personalityId, role, content, imageUrl = null) {
-  const colRef = collection(db, 'users', uid, 'chats', personalityId, 'messages')
-  await addDoc(colRef, {
-    role, content, imageUrl,
-    timestamp: serverTimestamp()
-  })
+  const { error } = await supabase
+    .from('messages')
+    .insert([{
+      uid,
+      personalityId,
+      role,
+      content,
+      imageUrl
+    }])
+  if (error) throw error
 }
 
 export async function loadMessages(uid, personalityId, limitCount = 80) {
-  const colRef = collection(db, 'users', uid, 'chats', personalityId, 'messages')
-  const q = query(colRef, orderBy('timestamp', 'asc'), limit(limitCount))
-  const snap = await getDocs(q)
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('uid', uid)
+    .eq('personalityId', personalityId)
+    .order('timestamp', { ascending: true })
+    .limit(limitCount)
+  if (error) throw error
+  return data || []
 }
 
 export async function clearMessages(uid, personalityId) {
-  const colRef = collection(db, 'users', uid, 'chats', personalityId, 'messages')
-  const snap = await getDocs(colRef)
-  await Promise.all(snap.docs.map(d => deleteDoc(d.ref)))
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('uid', uid)
+    .eq('personalityId', personalityId)
+  if (error) throw error
 }
 
 // ── Custom Personalities ───────────────────────────────────────
 export async function saveCustomPersonality(uid, personality) {
-  const ref = doc(db, 'users', uid, 'personalities', personality.id || Date.now().toString())
-  await setDoc(ref, { ...personality, createdAt: serverTimestamp() })
-  return ref.id
+  const id = personality.id || Date.now().toString()
+  const { error } = await supabase
+    .from('personalities')
+    .upsert([{ ...personality, id, uid }])
+  if (error) throw error
+  return id
 }
 
 export async function loadCustomPersonalities(uid) {
-  const snap = await getDocs(collection(db, 'users', uid, 'personalities'))
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const { data, error } = await supabase
+    .from('personalities')
+    .select('*')
+    .eq('uid', uid)
+  if (error) throw error
+  return data || []
 }
 
 export async function deleteCustomPersonality(uid, id) {
-  await deleteDoc(doc(db, 'users', uid, 'personalities', id))
+  const { error } = await supabase
+    .from('personalities')
+    .delete()
+    .eq('id', id)
+    .eq('uid', uid)
+  if (error) throw error
 }
 
 // ── Admin ──────────────────────────────────────────────────────
 export async function isAdmin(uid) {
-  const snap = await getDoc(doc(db, 'users', uid))
-  return snap.exists() && snap.data().role === 'admin'
+  const { data, error } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', uid)
+    .single()
+  if (error) return false
+  return data?.role === 'admin'
 }
 
 export async function getUsageStats() {
   const users = await getAllUsers()
-  const stats = []
-  for (const user of users) {
-    const chats = await getDocs(collection(db, 'users', user.uid || user.id, 'chats'))
-    stats.push({ ...user, chatCount: chats.size })
-  }
+
+  // Get all messages to count per user
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select('uid')
+
+  if (error) throw error
+
+  const stats = users.map(user => {
+    const chatCount = messages.filter(m => m.uid === user.id).length
+    return { ...user, chatCount }
+  })
+
   return stats
 }

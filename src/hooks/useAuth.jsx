@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { onAuthStateChanged, signInWithRedirect, signOut } from 'firebase/auth'
-import { auth, googleProvider } from '../lib/firebase'
+import { supabase } from '../lib/supabase'
 import { ensureUser } from '../lib/db'
 
 const AuthContext = createContext(null)
@@ -11,22 +10,58 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const data = await ensureUser(firebaseUser)
-        setUser(firebaseUser)
+    // Check active sessions and sets the user
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleUser(session?.user ?? null)
+    })
+
+    // Listen for changes on auth state
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        handleUser(session?.user ?? null)
+      }
+    )
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  const handleUser = async (supabaseUser) => {
+    if (supabaseUser) {
+      try {
+        const data = await ensureUser(supabaseUser)
+        setUser({
+          ...supabaseUser,
+          uid: supabaseUser.id, // Map id to uid for backward compatibility
+          displayName: supabaseUser.user_metadata?.full_name || supabaseUser.email,
+          photoURL: supabaseUser.user_metadata?.avatar_url || ''
+        })
         setUserData(data)
-      } else {
+      } catch (err) {
+        console.error("Error ensuring user:", err)
         setUser(null)
         setUserData(null)
       }
-      setLoading(false)
-    })
-    return unsub
-  }, [])
+    } else {
+      setUser(null)
+      setUserData(null)
+    }
+    setLoading(false)
+  }
 
-  const signIn = () => signInWithRedirect(auth, googleProvider)
-  const logOut = () => signOut(auth)
+  const signIn = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' })
+    if (error) {
+      console.error("Error signing in:", error)
+    }
+  }
+
+  const logOut = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
+    setUserData(null)
+  }
 
   return (
     <AuthContext.Provider value={{ user, userData, loading, signIn, logOut }}>
