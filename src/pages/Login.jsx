@@ -13,7 +13,16 @@ export default function Login() {
     try {
       await signIn()
     } catch (e) {
-      setError('Sign-in failed. Make sure popups are allowed.')
+      console.error('Sign-in error:', e)
+      if (e.code === 'auth/popup-blocked') {
+        setError('Sign-in failed. Please allow popups for this site and try again.')
+      } else if (e.code === 'auth/configuration-not-found' || e.code === 'auth/invalid-api-key') {
+        setError('Sign-in failed. Firebase configuration is missing or incorrect. Check your .env file.')
+      } else if (e.code === 'auth/unauthorized-domain') {
+        setError('Sign-in failed. This domain is not authorized in the Firebase console.')
+      } else {
+        setError(`Sign-in failed: ${e.message || 'Unknown error'}`)
+      }
       setLoading(false)
     }
   }
