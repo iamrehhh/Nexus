@@ -10,24 +10,45 @@
 
 .glow1 {
   position: absolute;
-  top: -20%; left: -10%;
-  width: 60%; height: 60%;
-  background: radial-gradient(ellipse, rgba(120,60,160,0.15) 0%, transparent 70%);
+  top: -20%;
+  left: -10%;
+  width: 60%;
+  height: 60%;
+  background: radial-gradient(ellipse, rgba(120, 60, 160, 0.15) 0%, transparent 70%);
   pointer-events: none;
   animation: driftA 18s ease-in-out infinite alternate;
 }
 
 .glow2 {
   position: absolute;
-  bottom: -20%; right: -10%;
-  width: 50%; height: 50%;
-  background: radial-gradient(ellipse, rgba(200,100,140,0.1) 0%, transparent 70%);
+  bottom: -20%;
+  right: -10%;
+  width: 50%;
+  height: 50%;
+  background: radial-gradient(ellipse, rgba(200, 100, 140, 0.1) 0%, transparent 70%);
   pointer-events: none;
   animation: driftB 22s ease-in-out infinite alternate;
 }
 
-@keyframes driftA { from{transform:translate(0,0)} to{transform:translate(4%,6%)} }
-@keyframes driftB { from{transform:translate(0,0)} to{transform:translate(-4%,-5%)} }
+@keyframes driftA {
+  from {
+    transform: translate(0, 0)
+  }
+
+  to {
+    transform: translate(4%, 6%)
+  }
+}
+
+@keyframes driftB {
+  from {
+    transform: translate(0, 0)
+  }
+
+  to {
+    transform: translate(-4%, -5%)
+  }
+}
 
 .card {
   background: var(--bg2);
@@ -44,11 +65,23 @@
   animation: fadeUp 0.6s ease forwards;
 }
 
-@keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px)
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0)
+  }
+}
 
 .topLine {
   position: absolute;
-  top: 0; left: 0; right: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
 }
@@ -60,7 +93,17 @@
   animation: float 4s ease-in-out infinite;
 }
 
-@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0)
+  }
+
+  50% {
+    transform: translateY(-8px)
+  }
+}
 
 .title {
   font-family: 'Cormorant Garamond', serif;
@@ -100,12 +143,15 @@
 }
 
 .googleBtn:hover:not(:disabled) {
-  background: rgba(192,132,212,0.1);
+  background: rgba(192, 132, 212, 0.1);
   border-color: var(--border-hover);
   transform: translateY(-1px);
 }
 
-.googleBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+.googleBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 .spinner {
   width: 18px;
@@ -116,7 +162,11 @@
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .error {
   font-size: 12px;
@@ -128,4 +178,44 @@
   font-size: 11px;
   color: var(--text-faint);
   letter-spacing: 0.04em;
+}
+
+/* ── Tablet ── */
+@media (max-width: 768px) {
+  .card {
+    padding: 44px 36px;
+  }
+
+  .title {
+    font-size: 36px;
+  }
+}
+
+/* ── Phone ── */
+@media (max-width: 480px) {
+  .card {
+    padding: 36px 24px;
+    border-radius: 20px;
+  }
+
+  .emoji {
+    font-size: 40px;
+    margin-bottom: 14px;
+  }
+
+  .title {
+    font-size: 30px;
+    margin-bottom: 8px;
+  }
+
+  .sub {
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+
+  .googleBtn {
+    padding: 12px;
+    font-size: 14px;
+    border-radius: 12px;
+  }
 }

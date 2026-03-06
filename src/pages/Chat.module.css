@@ -456,3 +456,133 @@
   margin-top: 8px;
   letter-spacing: 0.04em;
 }
+
+/* ── Tablet ── */
+@media (max-width: 768px) {
+  .header {
+    padding: 12px 16px;
+    gap: 10px;
+  }
+
+  .personaEmoji {
+    font-size: 26px;
+  }
+
+  .personaName {
+    font-size: 17px;
+  }
+
+  .bubble {
+    max-width: 80%;
+  }
+
+  .headerCenter {
+    display: none;
+  }
+}
+
+/* ── Phone ── */
+@media (max-width: 480px) {
+  .header {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .backBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .personaEmoji {
+    font-size: 24px;
+  }
+
+  .personaName {
+    font-size: 16px;
+  }
+
+  .personaStatus {
+    font-size: 9px;
+  }
+
+  .personaInfo {
+    gap: 8px;
+  }
+
+  .headerCenter {
+    display: none;
+  }
+
+  .headerRight {
+    gap: 6px;
+  }
+
+  .iconBtn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .messages {
+    padding: 16px 12px;
+  }
+
+  .bubble {
+    max-width: 88%;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  .emptyState {
+    padding: 24px;
+  }
+
+  .emptyEmoji {
+    font-size: 44px;
+  }
+
+  .emptyQuote {
+    font-size: 16px;
+  }
+
+  .inputArea {
+    padding: 8px 12px 12px;
+  }
+
+  .inputRow {
+    padding: 6px 8px;
+    border-radius: 14px;
+    gap: 6px;
+  }
+
+  .uploadBtn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .sendBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+
+  .msgInput {
+    font-size: 14px;
+  }
+
+  .inputHint {
+    display: none;
+  }
+
+  .uploadPreview {
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .previewThumb {
+    width: 40px;
+    height: 40px;
+  }
+}

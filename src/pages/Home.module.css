@@ -288,3 +288,97 @@
 .createCard .cardBtn {
   background: linear-gradient(135deg, #374151, #1f2937);
 }
+
+/* ── Tablet ── */
+@media (max-width: 768px) {
+  .header {
+    padding: 16px 20px;
+  }
+
+  .main {
+    padding: 40px 20px 60px;
+  }
+
+  .heroTitle {
+    font-size: 32px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    padding: 24px 22px;
+  }
+}
+
+/* ── Phone ── */
+@media (max-width: 480px) {
+  .header {
+    padding: 14px 16px;
+  }
+
+  .logoText {
+    font-size: 20px;
+  }
+
+  .headerRight {
+    gap: 6px;
+  }
+
+  .iconBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .main {
+    padding: 28px 16px 48px;
+  }
+
+  .hero {
+    margin-bottom: 32px;
+  }
+
+  .heroTitle {
+    font-size: 26px;
+  }
+
+  .heroSub {
+    font-size: 13px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .card {
+    padding: 22px 18px;
+    border-radius: 16px;
+  }
+
+  .cardEmoji {
+    font-size: 28px;
+  }
+
+  .cardName {
+    font-size: 19px;
+  }
+
+  .cardDesc {
+    font-size: 12.5px;
+  }
+
+  /* Always show CTA on touch devices (no hover) */
+  .cardBtn {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
