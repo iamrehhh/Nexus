@@ -169,6 +169,7 @@ export default function Connect() {
                                     </div>
                                 </div>
                             )}
+                            <a href={`https://github.com/${services.github.data.profile?.login || ''}`} target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: 'var(--accent)', marginTop: 16 }}>Open GitHub →</a>
                         </div>
                     )}
                     {renderActionRow('github')}
@@ -223,6 +224,7 @@ export default function Connect() {
                                     ))}
                                 </div>
                             </div>
+                            <a href="https://open.spotify.com" target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: 'var(--accent)', marginTop: 16 }}>Open Spotify →</a>
                         </div>
                     )}
                     {renderActionRow('spotify')}
@@ -264,7 +266,7 @@ export default function Connect() {
                                     ))}
                                 </div>
                             )}
-                            <a href="https://gmail.com" target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: '--var(--accent)', marginTop: 16 }}>Open Gmail →</a>
+                            <a href="https://gmail.com" target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: 'var(--accent)', marginTop: 16 }}>Open Gmail →</a>
                         </div>
                     )}
                     {renderActionRow('gmail')}
@@ -316,7 +318,7 @@ export default function Connect() {
                                 </div>
                             )}
 
-                            <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: '--var(--accent)', marginTop: 16 }}>Open Calendar →</a>
+                            <a href="https://calendar.google.com" target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 12, color: 'var(--accent)', marginTop: 16 }}>Open Calendar →</a>
                         </div>
                     )}
                     {renderActionRow('calendar')}
