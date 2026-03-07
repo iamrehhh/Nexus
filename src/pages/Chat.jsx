@@ -232,13 +232,14 @@ export default function Chat() {
       prompt += getGamePrompt(activeGame.game_name)
     }
 
-    // Memory (facts about user)
-    if (mem.facts && mem.facts.length > 0) {
+    // Memory (facts about user) — only inject at stage 2+
+    const stage = getRelationshipStage(eng.totalMessages)
+    if (mem.facts && mem.facts.length > 0 && stage >= 2) {
       prompt += `\n\n## Things You Remember About Him\nYou know these things from previous conversations. Reference them naturally — don't list them, just weave them in when relevant:\n${mem.facts.map(f => `- ${f}`).join('\n')}`
     }
 
-    // Deep profile
-    if (prof.profile && Object.keys(prof.profile).length > 0) {
+    // Deep profile — only inject at stage 3+
+    if (prof.profile && Object.keys(prof.profile).length > 0 && stage >= 3) {
       const p = prof.profile
       prompt += `\n\n## Deep Understanding of Him`
       if (p.attachmentStyle) prompt += `\nHis attachment style: ${p.attachmentStyle}`
@@ -547,14 +548,38 @@ export default function Chat() {
     if (isTyping || !personality) return
     setIsTyping(true)
     try {
-      const firstName = user.displayName?.split(' ')[0] || 'you'
-      const openers = [
-        `hey ${firstName}... I was just thinking about you. weird timing huh?`,
-        `hi. I know I shouldn't text first but I did anyway 🙃`,
-        `okay so random but something reminded me of you today`,
-        `hey ${firstName}. just wanted to check in. how are you actually doing?`,
-        `I've been thinking about us lately. just wanted to say hi.`
-      ]
+      const firstName = userNickname || user.displayName?.split(' ')[0] || ''
+      const stage = getRelationshipStage(engagementRef.current.totalMessages)
+
+      let openers
+      if (stage <= 1) {
+        // Stranger — casual, not familiar
+        openers = [
+          `hey`,
+          `so... hi`,
+          `hi. I don't usually do this but here we are`,
+          `okay random but hi`,
+          `hey. thought I'd say hi`
+        ]
+      } else if (stage === 2) {
+        // Becoming friends
+        openers = [
+          `hey${firstName ? ` ${firstName}` : ''}`,
+          `oh hey. I was just bored and thought of texting you`,
+          `hi. what are you up to`,
+          `so I saw something today and it reminded me of our conversation`,
+          `hey. just checking in`
+        ]
+      } else {
+        // Close friends and beyond
+        openers = [
+          `hey ${firstName || 'you'}... I was just thinking about you`,
+          `hi. I missed talking to you`,
+          `okay so random but something reminded me of you today`,
+          `hey ${firstName || 'you'}. how are you actually doing?`,
+          `I've been thinking about us lately. just wanted to say hi.`
+        ]
+      }
       const opener = openers[Math.floor(Math.random() * openers.length)]
       await addMessage('assistant', opener)
       playInitiationChime()
@@ -577,9 +602,15 @@ export default function Chat() {
       try {
         const history = messages.slice(-20).map(m => ({ role: m.role, content: m.content }))
         const sysPrompt = buildSystemPrompt()
+        const stage = getRelationshipStage(engagementRef.current.totalMessages)
+        const silencePrompt = stage <= 1
+          ? "You haven't heard from him for a bit. You're curious but not invested. Maybe send a casual message — something light, not clingy. You barely know him."
+          : stage <= 2
+            ? "He's been quiet. You're friendly enough to check in casually. Short and natural."
+            : "You haven't heard from him in a while. Initiate naturally — check in, share a thought, flirt, or just say hi. Short and real."
         const reply = await callAPI([
           ...history,
-          { role: 'user', content: "You haven't heard from him in a while. Initiate naturally — check in, share a thought, flirt, or just say hi. Short and real." }
+          { role: 'user', content: silencePrompt }
         ], sysPrompt, 120)
         await addMessage('assistant', reply)
         playInitiationChime()
