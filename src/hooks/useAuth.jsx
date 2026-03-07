@@ -10,12 +10,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       handleUser(session?.user ?? null)
     })
 
-    // Listen for changes on auth state
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         handleUser(session?.user ?? null)
@@ -33,7 +31,7 @@ export function AuthProvider({ children }) {
         const data = await ensureUser(supabaseUser)
         setUser({
           ...supabaseUser,
-          uid: supabaseUser.id, // Map id to uid for backward compatibility
+          uid: supabaseUser.id,
           displayName: supabaseUser.user_metadata?.full_name || supabaseUser.email,
           photoURL: supabaseUser.user_metadata?.avatar_url || ''
         })
@@ -51,7 +49,12 @@ export function AuthProvider({ children }) {
   }
 
   const signIn = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' })
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + '/dashboard'
+      }
+    })
     if (error) {
       console.error("Error signing in:", error)
     }

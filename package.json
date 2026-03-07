@@ -1,29 +1,32 @@
 {
-  "name": "nexus-ai-gf",
-  "version": "1.0.0",
+  "name": "nexus",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "seed-knowledge": "node scripts/seed-knowledge.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.2.10",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.395.0",
     "openai": "^6.27.0",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.5.207",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.4.1",
-    "react-router-dom": "^6.23.1"
+    "react-router-dom": "^6.23.1",
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "console-ninja": "^1.0.0",
-    "vite": "^5.2.13"
+    "vite": "^5.4.21"
   }
 }
