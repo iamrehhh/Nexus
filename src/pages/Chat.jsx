@@ -14,7 +14,8 @@ import {
   addToPlaylist, loadUserSettings, saveUserSettings,
   getAvatarUrl, setFirstConversationDate, getFirstConversationDate,
   saveDiaryEntry, getLatestDiaryEntry,
-  loadCommunicationProfile, saveCommunicationProfile
+  loadCommunicationProfile, saveCommunicationProfile,
+  getNickname
 } from '../lib/db'
 import {
   getNextPhase, getRandomThreshold, getPhasePrompt,
@@ -66,6 +67,7 @@ export default function Chat() {
   const [firstConvDate, setFirstConvDate] = useState(null)
   const [currentMood, setCurrentMood] = useState(null)
   const [commProfile, setCommProfile] = useState(null)
+  const [userNickname, setUserNickname] = useState(null)
 
   // Memory & engagement state (loaded from DB)
   const memoryRef = useRef({ facts: [], lastExtractedAt: 0 })
@@ -169,6 +171,9 @@ export default function Chat() {
     loadCommunicationProfile(user.uid, personalityId).then(cp => {
       if (cp) setCommProfile(cp)
     }).catch(() => { })
+
+    // Load nickname
+    getNickname(user.uid).then(n => { if (n) setUserNickname(n) }).catch(() => { })
   }, [user, personalityId])
 
   // She initiates if no messages
@@ -182,14 +187,18 @@ export default function Chat() {
 
   // ── Build enhanced system prompt ──────────────────────────────
   const buildSystemPrompt = () => {
-    const firstName = user.displayName?.split(' ')[0] || 'you'
+    const firstName = userNickname || user.displayName?.split(' ')[0] || 'you'
     const eng = engagementRef.current
     const mem = memoryRef.current
     const prof = profileRef.current
     const timeCtx = getTimeContext()
 
     let prompt = personality.systemPrompt
-    prompt += `\n\nUser's real name: ${firstName}. Use it occasionally — naturally, not every message.`
+    if (userNickname) {
+      prompt += `\n\nHe wants you to call him "${userNickname}". Use this name naturally — not every message, but it's what he prefers. His real name is ${user.displayName?.split(' ')[0] || 'unknown'}.`
+    } else {
+      prompt += `\n\nUser's real name: ${firstName}. Use it occasionally — naturally, not every message.`
+    }
 
     // Time awareness
     prompt += `\n\n${timeCtx.prompt}`

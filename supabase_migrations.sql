@@ -68,6 +68,7 @@ create table if not exists user_settings (
 -- Add columns to users table
 alter table users add column if not exists birthday date;
 alter table users add column if not exists first_conversation_date date;
+alter table users add column if not exists nickname text;
 
 -- RLS Policies (enable row-level security)
 alter table message_reactions enable row level security;

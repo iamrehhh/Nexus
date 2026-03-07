@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getBirthday, setBirthday } from '../lib/db'
+import { getBirthday, setBirthday, getNickname, setNickname } from '../lib/db'
 import { ArrowLeft, Save } from 'lucide-react'
 import styles from './Settings.module.css'
 
@@ -9,20 +9,22 @@ export default function Settings() {
     const { user } = useAuth()
     const navigate = useNavigate()
     const [birthday, setBirthdayState] = useState('')
+    const [nickname, setNicknameState] = useState('')
     const [saving, setSaving] = useState(false)
     const [saved, setSaved] = useState(false)
 
     useEffect(() => {
         if (user) {
             getBirthday(user.uid).then(b => { if (b) setBirthdayState(b) }).catch(() => { })
+            getNickname(user.uid).then(n => { if (n) setNicknameState(n) }).catch(() => { })
         }
     }, [user])
 
     const handleSave = async () => {
-        if (!birthday) return
         setSaving(true)
         try {
-            await setBirthday(user.uid, birthday)
+            if (birthday) await setBirthday(user.uid, birthday)
+            await setNickname(user.uid, nickname.trim() || null)
             setSaved(true)
             setTimeout(() => setSaved(false), 2000)
         } catch (e) {
@@ -43,6 +45,20 @@ export default function Settings() {
 
             <div className={styles.content}>
                 <section className={styles.section}>
+                    <h2 className={styles.sectionTitle}>Your Nickname</h2>
+                    <p className={styles.sectionSub}>She'll call you by this name instead of your real one 💬</p>
+                    <div className={styles.inputRow}>
+                        <input
+                            type="text"
+                            className={styles.input}
+                            value={nickname}
+                            onChange={e => setNicknameState(e.target.value)}
+                            placeholder="What should she call you?"
+                        />
+                    </div>
+                </section>
+
+                <section className={styles.section}>
                     <h2 className={styles.sectionTitle}>Your Birthday</h2>
                     <p className={styles.sectionSub}>She'll remember it and send you something special 🎂</p>
                     <div className={styles.inputRow}>
@@ -52,11 +68,12 @@ export default function Settings() {
                             value={birthday}
                             onChange={e => setBirthdayState(e.target.value)}
                         />
-                        <button className={styles.saveBtn} onClick={handleSave} disabled={saving}>
-                            {saved ? '✓ Saved' : saving ? 'Saving...' : <><Save size={14} /> Save</>}
-                        </button>
                     </div>
                 </section>
+
+                <button className={styles.saveBtn} onClick={handleSave} disabled={saving} style={{ width: '100%', marginBottom: 24 }}>
+                    {saved ? '✓ Saved' : saving ? 'Saving...' : <><Save size={14} /> Save</>}
+                </button>
 
                 <section className={styles.section}>
                     <h2 className={styles.sectionTitle}>Account</h2>

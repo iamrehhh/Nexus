@@ -461,6 +461,23 @@ export async function getBirthday(uid) {
   return data?.birthday || null
 }
 
+export async function setNickname(uid, nickname) {
+  const { error } = await supabase
+    .from('users')
+    .update({ nickname })
+    .eq('id', uid)
+  if (error) throw error
+}
+
+export async function getNickname(uid) {
+  const { data } = await supabase
+    .from('users')
+    .select('nickname')
+    .eq('id', uid)
+    .single()
+  return data?.nickname || null
+}
+
 // ── Communication Profile (adaptive tuning) ────────────────────
 export async function loadCommunicationProfile(uid, personalityId) {
   const { data, error } = await supabase
