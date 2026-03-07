@@ -108,3 +108,42 @@ create table if not exists user_communication_profile (
 
 alter table user_communication_profile enable row level security;
 create policy "Users manage own comm profile" on user_communication_profile for all using (auth.uid() = user_id);
+
+-- ── RAG KNOWLEDGE SYSTEM ───────────────────────────────────
+
+-- Enable pgvector extension
+create extension if not exists vector;
+
+-- character_knowledge table
+create table if not exists character_knowledge (
+  id uuid primary key default gen_random_uuid(),
+  character_id text not null,
+  content text not null,
+  embedding vector(1536),
+  category text,
+  created_at timestamptz default now()
+);
+
+-- Index for fast cosine similarity search
+create index on character_knowledge 
+using ivfflat (embedding vector_cosine_ops)
+with (lists = 100);
+
+-- RPC function for retrieving matching knowledge
+create or replace function match_knowledge(
+  query_embedding vector(1536),
+  match_character_id text,
+  match_count int default 5
+)
+returns table(content text, similarity float)
+language sql stable
+as $$
+  select 
+    content,
+    1 - (embedding <=> query_embedding) as similarity
+  from character_knowledge
+  where character_id = match_character_id
+    and 1 - (embedding <=> query_embedding) > 0.7
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;

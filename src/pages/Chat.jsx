@@ -58,6 +58,8 @@ export default function Chat() {
   const [reactions, setReactions] = useState({})
   const [activeReactionMsg, setActiveReactionMsg] = useState(null)
   const [showThemePicker, setShowThemePicker] = useState(false)
+  const [ragKnowledge, setRagKnowledge] = useState('')
+  const [messagesSinceRag, setMessagesSinceRag] = useState(0)
   const [isRecording, setIsRecording] = useState(false)
   const [isSpeakingState, setIsSpeakingState] = useState(false)
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState(null)
@@ -186,7 +188,7 @@ export default function Chat() {
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
 
   // ── Build enhanced system prompt ──────────────────────────────
-  const buildSystemPrompt = () => {
+  const buildSystemPrompt = (localRag = ragKnowledge) => {
     const firstName = userNickname || user.displayName?.split(' ')[0] || 'you'
     const eng = engagementRef.current
     const mem = memoryRef.current
@@ -198,6 +200,10 @@ export default function Chat() {
       prompt += `\n\nHe wants you to call him "${userNickname}". Use this name naturally — not every message, but it's what he prefers. His real name is ${user.displayName?.split(' ')[0] || 'unknown'}.`
     } else {
       prompt += `\n\nUser's real name: ${firstName}. Use it occasionally — naturally, not every message.`
+    }
+
+    if (localRag) {
+      prompt += `\n\n## RELEVANT BACKGROUND KNOWLEDGE\nThe following is true about your world and background. Use it naturally when relevant — never list it, never lecture about it, just let it inform your responses the way lived experience informs conversation:\n\n${localRag}`
     }
 
     // ── CRITICAL: Living person behavior rules ──────────────────
@@ -370,6 +376,20 @@ ${isUnreachable ? '- RIGHT NOW you are slightly distracted/elsewhere. Keep repli
     if (data.error) throw new Error(data.error)
     if (data.mood) setCurrentMood(data.mood)
     return data.reply
+  }
+
+  const retrieveRagKnowledge = async (text) => {
+    try {
+      const res = await fetch('/api/retrieve-knowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, characterId: personalityId })
+      })
+      const data = await res.json()
+      return data.knowledge || ''
+    } catch (e) {
+      return '' // fail silently on RAG error
+    }
   }
 
   const analyzeImage = async (base64, mime) => {
@@ -853,11 +873,21 @@ ${isUnreachable ? '- RIGHT NOW you are slightly distracted/elsewhere. Keep repli
     setIsTyping(true)
 
     try {
+      // Manage RAG: Refresh context if 5+ msgs passed or user sends long msg
+      let currentRag = ragKnowledge
+      if (messagesSinceRag >= 5 || apiContent.length > 50) {
+        currentRag = await retrieveRagKnowledge(apiContent)
+        setRagKnowledge(currentRag)
+        setMessagesSinceRag(0)
+      } else {
+        setMessagesSinceRag(prev => prev + 1)
+      }
+
       const history = [...messages, { role: 'user', content: apiContent }]
         .slice(-30)
         .map(m => ({ role: m.role, content: m.content }))
 
-      const sysPrompt = buildSystemPrompt()
+      const sysPrompt = buildSystemPrompt(currentRag)
       let reply = await callAPI(history, sysPrompt)
 
       // Update engagement state
