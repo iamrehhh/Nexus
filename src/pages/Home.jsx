@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { PRESET_PERSONALITIES } from '../lib/personalities'
 import { loadCustomPersonalities } from '../lib/db'
-import { Sun, Moon, Settings, Plus, LogOut } from 'lucide-react'
+import { Sun, Moon, Settings, Plus, LogOut, User } from 'lucide-react'
 import styles from './Home.module.css'
 
 export default function Home() {
@@ -29,16 +29,19 @@ export default function Home() {
         </div>
         <div className={styles.headerRight}>
           <button className={styles.iconBtn} onClick={toggle} title="Toggle theme">
-            {theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
           {userData?.role === 'admin' && (
             <button className={styles.iconBtn} onClick={() => navigate('/admin')} title="Admin">
-              <Settings size={18}/>
+              <Settings size={18} />
             </button>
           )}
+          <button className={styles.iconBtn} onClick={() => navigate('/settings')} title="Settings">
+            <User size={18} />
+          </button>
           <img src={user?.photoURL} className={styles.avatar} alt="" />
           <button className={styles.iconBtn} onClick={logOut} title="Sign out">
-            <LogOut size={18}/>
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -63,7 +66,7 @@ export default function Home() {
 
           {/* Create custom */}
           <button className={`${styles.card} ${styles.createCard}`} onClick={() => navigate('/create')}>
-            <div className={styles.cardEmoji}><Plus size={32} strokeWidth={1.5}/></div>
+            <div className={styles.cardEmoji}><Plus size={32} strokeWidth={1.5} /></div>
             <div className={styles.cardName}>Create Your Own</div>
             <div className={styles.cardTagline}>Build from scratch</div>
             <div className={styles.cardDesc}>Upload chat screenshots, describe her personality, and Nexus will bring her to life.</div>

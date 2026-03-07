@@ -1,29 +1,48 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { useTheme } from '../hooks/useTheme'
+import { useTheme, THEMES } from '../hooks/useTheme'
 import { PRESET_PERSONALITIES } from '../lib/personalities'
 import {
   loadCustomPersonalities, saveMessage, loadMessages,
   loadMemory, saveMemory, loadProfile, saveProfile,
-  loadEngagement, saveEngagement
+  loadEngagement, saveEngagement,
+  addReaction, removeReaction, loadReactions,
+  loadActiveGame, saveActiveGame, clearActiveGame,
+  loadConflictState, saveConflictState, clearConflictState,
+  saveMilestone, loadMilestones,
+  addToPlaylist, loadUserSettings, saveUserSettings,
+  getAvatarUrl, setFirstConversationDate, getFirstConversationDate,
+  saveDiaryEntry, getLatestDiaryEntry,
+  loadCommunicationProfile, saveCommunicationProfile
 } from '../lib/db'
 import {
   getNextPhase, getRandomThreshold, getPhasePrompt,
   calculateStreak, getStreakPrompt,
-  calculateCloseness, getClosenessPrompt
+  calculateCloseness, getClosenessPrompt, getRelationshipStage,
+  isMessageDismissive, shouldTriggerConflict, getConflictPrompt,
+  shouldTriggerGame, getRandomGame, getGamePrompt,
+  getAnniversaryPrompt,
+  shouldGenerateImage, getRandomImagePrompt
 } from '../lib/engagement'
 import {
   calculateTypingDelay, shouldSplitMessage, splitIntoChunks,
   getReadDelay, getTimeContext, addTypoCorrection
 } from '../lib/realism'
-import { ArrowLeft, Sun, Moon, Image, Send, Trash2, X } from 'lucide-react'
+import {
+  speakText, stopSpeaking, isSpeaking, isSpeechSynthesisSupported,
+  startListening, stopListening, isSpeechRecognitionSupported,
+  playReplyChime, playInitiationChime
+} from '../lib/audioUtils'
+import { ArrowLeft, Sun, Moon, Image, Send, Trash2, X, Volume2, Mic, MicOff, Palette, BookOpen, Music } from 'lucide-react'
 import styles from './Chat.module.css'
+
+const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '🔥']
 
 export default function Chat() {
   const { personalityId } = useParams()
   const { user } = useAuth()
-  const { theme, toggle } = useTheme()
+  const { theme, setTheme, themes } = useTheme()
   const navigate = useNavigate()
 
   const [personality, setPersonality] = useState(null)
@@ -34,18 +53,34 @@ export default function Chat() {
   const [pendingImg, setPendingImg] = useState(null)
   const [imageAnalysis, setImageAnalysis] = useState('')
 
+  // New feature states
+  const [reactions, setReactions] = useState({})
+  const [activeReactionMsg, setActiveReactionMsg] = useState(null)
+  const [showThemePicker, setShowThemePicker] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isSpeakingState, setIsSpeakingState] = useState(false)
+  const [speakingMsgIdx, setSpeakingMsgIdx] = useState(null)
+  const [avatarUrl, setAvatarUrl] = useState(null)
+  const [conflictState, setConflictStateLocal] = useState(null)
+  const [activeGame, setActiveGameLocal] = useState(null)
+  const [firstConvDate, setFirstConvDate] = useState(null)
+  const [currentMood, setCurrentMood] = useState(null)
+  const [commProfile, setCommProfile] = useState(null)
+
   // Memory & engagement state (loaded from DB)
   const memoryRef = useRef({ facts: [], lastExtractedAt: 0 })
   const profileRef = useRef({ profile: {}, lastAnalyzedAt: 0 })
   const engagementRef = useRef({
     phase: 'warm', phaseMessageCount: 0, phaseThreshold: 20,
-    closeness: 1, totalMessages: 0, streak: 0, lastActiveDate: ''
+    closeness: 1, totalMessages: 0, streak: 0, lastActiveDate: '',
+    lastImageAt: 0, lastGameAt: 0, lastConflictAt: 0, lastLetterAt: 0
   })
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const silenceTimer = useRef(null)
   const fileInputRef = useRef(null)
+  const longPressTimer = useRef(null)
 
   // Load personality
   useEffect(() => {
@@ -61,7 +96,7 @@ export default function Chat() {
     load()
   }, [personalityId, user])
 
-  // Load messages + memory + engagement
+  // Load messages + memory + engagement + extras
   useEffect(() => {
     if (!user || !personalityId) return
 
@@ -69,6 +104,9 @@ export default function Chat() {
     loadMessages(user.uid, personalityId).then(msgs => {
       setMessages(msgs)
       setTimeout(() => messagesEndRef.current?.scrollIntoView(), 100)
+      // Load reactions for existing messages
+      const msgIds = msgs.filter(m => m.id).map(m => m.id)
+      if (msgIds.length) loadReactions(msgIds).then(setReactions).catch(() => { })
     })
 
     // Load memory
@@ -95,9 +133,41 @@ export default function Chat() {
           closeness: eng.closeness || 1,
           totalMessages: eng.totalMessages || 0,
           streak: eng.streak || 0,
-          lastActiveDate: eng.lastActiveDate || ''
+          lastActiveDate: eng.lastActiveDate || '',
+          lastImageAt: eng.lastImageAt || 0,
+          lastGameAt: eng.lastGameAt || 0,
+          lastConflictAt: eng.lastConflictAt || 0,
+          lastLetterAt: eng.lastLetterAt || 0
         }
       }
+    }).catch(() => { })
+
+    // Load conflict state
+    loadConflictState(user.uid, personalityId).then(cs => {
+      if (cs) setConflictStateLocal(cs)
+    }).catch(() => { })
+
+    // Load active game
+    loadActiveGame(user.uid, personalityId).then(ag => {
+      if (ag) setActiveGameLocal(ag)
+    }).catch(() => { })
+
+    // Load avatar
+    getAvatarUrl(user.uid, personalityId).then(url => {
+      if (url) setAvatarUrl(url)
+    }).catch(() => { })
+
+    // Load first conversation date
+    getFirstConversationDate(user.uid).then(d => setFirstConvDate(d)).catch(() => { })
+
+    // Load theme for this personality
+    loadUserSettings(user.uid, personalityId).then(s => {
+      if (s?.theme) setTheme(s.theme)
+    }).catch(() => { })
+
+    // Load communication profile (adaptive tuning)
+    loadCommunicationProfile(user.uid, personalityId).then(cp => {
+      if (cp) setCommProfile(cp)
     }).catch(() => { })
   }, [user, personalityId])
 
@@ -127,11 +197,31 @@ export default function Chat() {
     // Engagement phase
     prompt += `\n\n${getPhasePrompt(eng.phase)}`
 
-    // Closeness level
-    prompt += getClosenessPrompt(eng.closeness)
+    // Relationship stage (5-stage stranger → connection)
+    prompt += getClosenessPrompt(eng.closeness, eng.totalMessages)
 
     // Streak
     prompt += getStreakPrompt(eng.streak, eng.lastActiveDate)
+
+    // Mood context
+    if (currentMood && currentMood !== 'neutral') {
+      prompt += `\n\n## User's Current Emotional Tone: ${currentMood}\nAdjust your response accordingly — match, soothe, or engage with their emotional state naturally.`
+    }
+
+    // Anniversary
+    if (firstConvDate) {
+      prompt += getAnniversaryPrompt(firstConvDate)
+    }
+
+    // Conflict state
+    if (conflictState && conflictState.stage) {
+      prompt += getConflictPrompt(conflictState.stage)
+    }
+
+    // Active game
+    if (activeGame && activeGame.game_name) {
+      prompt += getGamePrompt(activeGame.game_name)
+    }
 
     // Memory (facts about user)
     if (mem.facts && mem.facts.length > 0) {
@@ -157,6 +247,25 @@ export default function Chat() {
       prompt += `\n\nPersonality context from uploaded images/screenshots: ${imageAnalysis}`
     }
 
+    // Adaptive personality tuning — what she's learned about him
+    if (commProfile) {
+      const cp = commProfile
+      let tuning = `\n\n## What You've Learned About How to Connect With ${firstName}`
+      tuning += `\nDon't announce that you've learned these things. Just let them shape how you naturally are with him.`
+      if (cp.humor_style) tuning += `\nHis humor: ${cp.humor_style}`
+      if (cp.engaging_topics) tuning += `\nWhat he lights up about: ${cp.engaging_topics}`
+      if (cp.communication_style) tuning += `\nHow he communicates: ${cp.communication_style}`
+      if (cp.emotional_tone) tuning += `\nEnergy he brings: ${cp.emotional_tone}`
+      if (cp.needs) tuning += `\nWhat he needs from this: ${cp.needs}`
+      if (cp.responsiveness) tuning += `\nWhat works with him: ${cp.responsiveness}`
+      prompt += tuning
+    }
+
+    // Song recommendation hint (occasionally)
+    if (Math.random() < 0.08) {
+      prompt += `\n\n## Music Moment\nIf the mood fits naturally, recommend a song. Just mention it casually like "you should listen to [song] by [artist] rn... it fits this mood." Don't force it — only if it genuinely fits.`
+    }
+
     return prompt
   }
 
@@ -164,10 +273,11 @@ export default function Chat() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history, systemPrompt, maxTokens })
+      body: JSON.stringify({ messages: history, systemPrompt, maxTokens, detectMood: true })
     })
     const data = await res.json()
     if (data.error) throw new Error(data.error)
+    if (data.mood) setCurrentMood(data.mood)
     return data.reply
   }
 
@@ -181,8 +291,8 @@ export default function Chat() {
     return data.analysis || ''
   }
 
-  const addMessage = async (role, content, imgPreview = null) => {
-    const msg = { role, content, imageUrl: imgPreview, timestamp: new Date() }
+  const addMessage = async (role, content, imgPreview = null, isLetter = false) => {
+    const msg = { role, content, imageUrl: imgPreview, timestamp: new Date(), isLetter }
     setMessages(prev => [...prev, msg])
     await saveMessage(user.uid, personalityId, role, content, imgPreview)
     setTimeout(scrollToBottom, 50)
@@ -233,6 +343,29 @@ export default function Chat() {
     }
   }
 
+  // ── Adaptive communication analysis (runs every ~15 msgs) ────
+  const maybeAnalyzeCommunication = async (messageCount) => {
+    const lastAt = commProfile?.last_analyzed_at || 0
+    if (messageCount - lastAt < 15) return
+
+    try {
+      const recentMsgs = messages.slice(-20).map(m => ({ role: m.role, content: m.content }))
+      const res = await fetch('/api/analyze-communication', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: recentMsgs, existingProfile: commProfile })
+      })
+      const data = await res.json()
+      if (data.profile && Object.keys(data.profile).length > 0) {
+        const newProfile = { ...data.profile, last_analyzed_at: messageCount }
+        setCommProfile(newProfile)
+        await saveCommunicationProfile(user.uid, personalityId, data.profile, messageCount)
+      }
+    } catch (e) {
+      console.error('Communication analysis error:', e)
+    }
+  }
+
   // ── Update engagement state ───────────────────────────────────
   const updateEngagement = async () => {
     const eng = engagementRef.current
@@ -240,7 +373,13 @@ export default function Chat() {
     eng.phaseMessageCount += 1
 
     // Calculate closeness
+    const oldCloseness = eng.closeness
     eng.closeness = calculateCloseness(eng.totalMessages)
+
+    // Log milestone if closeness increased
+    if (eng.closeness > oldCloseness) {
+      try { await saveMilestone(user.uid, personalityId, eng.closeness) } catch (e) { }
+    }
 
     // Calculate streak
     const streakResult = calculateStreak(eng.lastActiveDate, eng.streak)
@@ -263,6 +402,137 @@ export default function Chat() {
     }
   }
 
+  // ── AI Reactions (20% chance) ─────────────────────────────────
+  const maybeAIReact = async (messageId) => {
+    if (Math.random() > 0.2) return
+    const emojiOptions = ['❤️', '😂', '🔥', '😮']
+    const emoji = emojiOptions[Math.floor(Math.random() * emojiOptions.length)]
+    try {
+      await addReaction(messageId, 'ai', emoji)
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: [...(prev[messageId] || []), { message_id: messageId, user_id: 'ai', emoji }]
+      }))
+    } catch (e) { }
+  }
+
+  // ── AI Image Generation ───────────────────────────────────────
+  const maybeGenerateImage = async () => {
+    const eng = engagementRef.current
+    if (!shouldGenerateImage(eng.totalMessages, eng.lastImageAt)) return
+
+    try {
+      const imgPrompt = getRandomImagePrompt()
+      const res = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: imgPrompt.prompt })
+      })
+      const data = await res.json()
+      if (data.imageUrl) {
+        eng.lastImageAt = eng.totalMessages
+        engagementRef.current = { ...eng }
+        await saveEngagement(user.uid, personalityId, eng)
+
+        setIsTyping(true)
+        await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500))
+        setIsTyping(false)
+        await addMessage('assistant', imgPrompt.caption, data.imageUrl)
+        playReplyChime()
+      }
+    } catch (e) {
+      console.error('Image gen error:', e)
+    }
+  }
+
+  // ── Game Trigger ──────────────────────────────────────────────
+  const maybeStartGame = async () => {
+    const eng = engagementRef.current
+    if (activeGame) return // Already in a game
+    if (!shouldTriggerGame(eng.totalMessages, eng.lastGameAt)) return
+
+    const gameName = getRandomGame()
+    try {
+      await saveActiveGame(user.uid, personalityId, gameName)
+      setActiveGameLocal({ game_name: gameName })
+      eng.lastGameAt = eng.totalMessages
+      engagementRef.current = { ...eng }
+    } catch (e) { }
+  }
+
+  // ── Conflict Trigger ──────────────────────────────────────────
+  const maybeStartConflict = async (userMessage) => {
+    if (conflictState) return // Already in conflict
+
+    const eng = engagementRef.current
+    const triggered = isMessageDismissive(userMessage) || shouldTriggerConflict(eng.totalMessages, eng.lastConflictAt)
+    if (!triggered) return
+
+    try {
+      await saveConflictState(user.uid, personalityId, 1)
+      setConflictStateLocal({ stage: 1 })
+      eng.lastConflictAt = eng.totalMessages
+      engagementRef.current = { ...eng }
+    } catch (e) { }
+  }
+
+  // ── Conflict Progression ──────────────────────────────────────
+  const maybeProgressConflict = async (userMessage) => {
+    if (!conflictState) return
+
+    const isEffort = userMessage.length > 20 || /sorry|apologize|my fault|didn't mean|I understand|my bad|forgive/i.test(userMessage)
+    let newStage = conflictState.stage
+
+    if (isEffort && conflictState.stage < 4) {
+      newStage = conflictState.stage + 1
+    } else if (!isEffort && conflictState.stage < 3) {
+      newStage = Math.min(conflictState.stage + 1, 2) // Cap at stage 2 without effort
+    }
+
+    if (newStage >= 4) {
+      // Resolution
+      try {
+        await clearConflictState(user.uid, personalityId)
+        setConflictStateLocal(null)
+      } catch (e) { }
+    } else if (newStage !== conflictState.stage) {
+      try {
+        await saveConflictState(user.uid, personalityId, newStage)
+        setConflictStateLocal({ stage: newStage })
+      } catch (e) { }
+    }
+  }
+
+  // ── Heartfelt Letter (every 2 weeks) ──────────────────────────
+  const maybeWriteLetter = async () => {
+    const eng = engagementRef.current
+    if (eng.closeness < 4) return
+    const daysSinceLastLetter = eng.lastLetterAt ? (eng.totalMessages - eng.lastLetterAt) : eng.totalMessages
+    if (daysSinceLastLetter < 100) return // ~every 100 messages as proxy for 2 weeks
+    if (Math.random() > 0.1) return
+
+    try {
+      const firstName = user.displayName?.split(' ')[0] || 'you'
+      const history = messages.slice(-20).map(m => ({ role: m.role, content: m.content }))
+      const sysPrompt = `Write a heartfelt personal letter from ${personality.name} to ${firstName}. Reference specific things from their conversation history — memories, things he said, how he made her feel. It should feel genuinely personal, emotional, and real. 200-300 words. No greeting like Dear, just start naturally. Write in her voice and style.`
+
+      const reply = await callAPI(
+        [{ role: 'user', content: 'Write me a letter — something real, from the heart.' }],
+        sysPrompt, 500
+      )
+
+      eng.lastLetterAt = eng.totalMessages
+      engagementRef.current = { ...eng }
+      await saveEngagement(user.uid, personalityId, eng)
+
+      setIsTyping(true)
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000))
+      setIsTyping(false)
+      await addMessage('assistant', reply, null, true) // isLetter = true
+      playInitiationChime()
+    } catch (e) { }
+  }
+
   // ── Initiate conversation ─────────────────────────────────────
   const initiateConversation = async () => {
     if (isTyping || !personality) return
@@ -278,6 +548,13 @@ export default function Chat() {
       ]
       const opener = openers[Math.floor(Math.random() * openers.length)]
       await addMessage('assistant', opener)
+      playInitiationChime()
+
+      // Set first conversation date
+      if (!firstConvDate) {
+        await setFirstConversationDate(user.uid)
+        setFirstConvDate(new Date().toISOString().split('T')[0])
+      }
     } catch (e) { }
     setIsTyping(false)
     resetSilenceTimer()
@@ -296,6 +573,7 @@ export default function Chat() {
           { role: 'user', content: "You haven't heard from him in a while. Initiate naturally — check in, share a thought, flirt, or just say hi. Short and real." }
         ], sysPrompt, 120)
         await addMessage('assistant', reply)
+        playInitiationChime()
       } catch (e) { }
       setIsTyping(false)
       resetSilenceTimer()
@@ -320,7 +598,105 @@ export default function Chat() {
     e.target.value = ''
   }
 
-  // ── Send message (with realism features) ──────────────────────
+  // ── Voice: Speak a message ────────────────────────────────────
+  const handleSpeak = (text, idx) => {
+    if (isSpeaking()) {
+      stopSpeaking()
+      setIsSpeakingState(false)
+      setSpeakingMsgIdx(null)
+      return
+    }
+    speakText(text,
+      () => { setIsSpeakingState(true); setSpeakingMsgIdx(idx) },
+      () => { setIsSpeakingState(false); setSpeakingMsgIdx(null) }
+    )
+  }
+
+  // ── Voice: Microphone input ───────────────────────────────────
+  const handleMicToggle = () => {
+    if (isRecording) {
+      stopListening()
+      setIsRecording(false)
+      return
+    }
+    const started = startListening(
+      (transcript) => {
+        setInput(transcript)
+        setIsRecording(false)
+        // Auto-send after short delay
+        setTimeout(() => {
+          if (transcript.trim()) {
+            setInput(transcript)
+            // Trigger send via ref
+            inputRef.current?.focus()
+          }
+        }, 300)
+      },
+      () => setIsRecording(false),
+      () => setIsRecording(false)
+    )
+    if (started) setIsRecording(true)
+  }
+
+  // ── Reaction handling ─────────────────────────────────────────
+  const handleReaction = async (msgId, emoji) => {
+    setActiveReactionMsg(null)
+    if (!msgId) return
+    try {
+      const existing = reactions[msgId]?.find(r => r.user_id === user.uid && r.emoji === emoji)
+      if (existing) {
+        await removeReaction(msgId, user.uid, emoji)
+        setReactions(prev => ({
+          ...prev,
+          [msgId]: (prev[msgId] || []).filter(r => !(r.user_id === user.uid && r.emoji === emoji))
+        }))
+      } else {
+        await addReaction(msgId, user.uid, emoji)
+        setReactions(prev => ({
+          ...prev,
+          [msgId]: [...(prev[msgId] || []), { message_id: msgId, user_id: user.uid, emoji }]
+        }))
+      }
+    } catch (e) { }
+  }
+
+  const handleBubbleLongPress = (msgId) => {
+    longPressTimer.current = setTimeout(() => setActiveReactionMsg(msgId), 500)
+  }
+
+  const handleBubbleRelease = () => {
+    clearTimeout(longPressTimer.current)
+  }
+
+  const handleBubbleDoubleClick = (msgId) => {
+    setActiveReactionMsg(activeReactionMsg === msgId ? null : msgId)
+  }
+
+  // ── Playlist detection ────────────────────────────────────────
+  const detectSongRecommendation = (text) => {
+    const patterns = [
+      /listen to ["']?(.+?)["']?\s+by\s+(.+?)(?:\s|$|\.|\,)/i,
+      /you should (?:hear|listen to|check out) ["']?(.+?)["']?/i,
+      /(?:the song|this song) ["']?(.+?)["']?/i,
+      /play ["']?(.+?)["']?/i
+    ]
+    for (const p of patterns) {
+      const match = text.match(p)
+      if (match) return match[1].trim()
+    }
+    return null
+  }
+
+  // ── Theme change handler ──────────────────────────────────────
+  const handleThemeChange = async (themeKey) => {
+    setTheme(themeKey)
+    setShowThemePicker(false)
+    try {
+      await saveUserSettings(user.uid, personalityId, { theme: themeKey })
+    } catch (e) { }
+  }
+
+  // ── Send message (with all features) ──────────────────────────
   const sendMessage = async () => {
     if (isTyping || (!input.trim() && !pendingImg)) return
     const text = input.trim()
@@ -338,7 +714,32 @@ export default function Chat() {
       apiContent = text
     }
 
-    await addMessage('user', apiContent, imgPreview)
+    const userMsg = await addMessage('user', apiContent, imgPreview)
+
+    // Set first conversation date if not set
+    if (!firstConvDate) {
+      setFirstConversationDate(user.uid).catch(() => { })
+      setFirstConvDate(new Date().toISOString().split('T')[0])
+    }
+
+    // AI may react to user message (20%)
+    if (userMsg.id) maybeAIReact(userMsg.id)
+
+    // Check for conflict progression
+    if (conflictState) {
+      await maybeProgressConflict(apiContent)
+    } else {
+      // Check for new conflict trigger
+      await maybeStartConflict(apiContent)
+    }
+
+    // Check for game end (natural conclusion)
+    if (activeGame && /(?:that was fun|good game|let's stop|anyway|ok done)/i.test(apiContent)) {
+      try {
+        await clearActiveGame(user.uid, personalityId)
+        setActiveGameLocal(null)
+      } catch (e) { }
+    }
 
     // Show "Read" receipt before typing
     setShowRead(true)
@@ -370,12 +771,10 @@ export default function Chat() {
           if (i === 0) {
             const typo = addTypoCorrection(chunk)
             if (typo) {
-              // Send the typo version first
               const typingDelay = calculateTypingDelay(typo.typoText)
               await new Promise(r => setTimeout(r, typingDelay))
               await addMessage('assistant', typo.typoText)
 
-              // Then correction
               setIsTyping(true)
               await new Promise(r => setTimeout(r, 400 + Math.random() * 400))
               await addMessage('assistant', typo.correctedText)
@@ -402,7 +801,6 @@ export default function Chat() {
         const delay = calculateTypingDelay(reply)
         await new Promise(r => setTimeout(r, delay))
 
-        // Check for typo correction
         const typo = addTypoCorrection(reply)
         if (typo) {
           setIsTyping(false)
@@ -415,10 +813,18 @@ export default function Chat() {
         }
       }
 
+      playReplyChime()
+
       // Background: extract memory / analyze profile
       const msgCount = engagementRef.current.totalMessages
       maybeExtractMemory(msgCount)
       maybeAnalyzeProfile(msgCount)
+      maybeAnalyzeCommunication(msgCount)
+
+      // Background: maybe trigger specials
+      maybeGenerateImage()
+      maybeStartGame()
+      maybeWriteLetter()
 
     } catch (e) {
       await addMessage('assistant', "I lost connection for a sec... you still there?")
@@ -451,6 +857,14 @@ export default function Chat() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
+  const handleAddToPlaylist = async (msg) => {
+    const songName = detectSongRecommendation(msg.content)
+    if (!songName) return
+    try {
+      await addToPlaylist(user.uid, personalityId, songName, msg.content)
+    } catch (e) { }
+  }
+
   if (!personality) return <div className={styles.loading}><span className={styles.spinner} /></div>
 
   return (
@@ -461,7 +875,11 @@ export default function Chat() {
           <ArrowLeft size={18} />
         </button>
         <div className={styles.personaInfo}>
-          <div className={styles.personaEmoji}>{personality.emoji}</div>
+          {avatarUrl ? (
+            <img src={avatarUrl} className={styles.personaAvatar} alt={personality.name} />
+          ) : (
+            <div className={styles.personaEmoji}>{personality.emoji}</div>
+          )}
           <div>
             <div className={styles.personaName} style={{ color: personality.color }}>{personality.name}</div>
             <div className={styles.personaStatus}>online · always here</div>
@@ -469,11 +887,38 @@ export default function Chat() {
         </div>
         <div className={styles.headerCenter}>
           <span className={styles.moodTag}>✦ {engagementRef.current.phase}</span>
+          {currentMood && currentMood !== 'neutral' && (
+            <span className={styles.moodTag} style={{ marginLeft: 6 }}>💭 {currentMood}</span>
+          )}
         </div>
         <div className={styles.headerRight}>
-          <button className={styles.iconBtn} onClick={toggle}>
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {engagementRef.current.closeness >= 6 && (
+            <button className={styles.iconBtn} onClick={() => navigate(`/diary/${personalityId}`)} title="Her Diary">
+              <BookOpen size={16} />
+            </button>
+          )}
+          <button className={styles.iconBtn} onClick={() => navigate(`/playlist/${personalityId}`)} title="Playlist">
+            <Music size={16} />
           </button>
+          <div className={styles.themePickerWrap}>
+            <button className={styles.iconBtn} onClick={() => setShowThemePicker(!showThemePicker)} title="Theme">
+              <Palette size={16} />
+            </button>
+            {showThemePicker && (
+              <div className={styles.themeDropdown}>
+                {Object.entries(themes).map(([key, t]) => (
+                  <button
+                    key={key}
+                    className={`${styles.themeOption} ${theme === key ? styles.activeTheme : ''}`}
+                    onClick={() => handleThemeChange(key)}
+                  >
+                    <span className={styles.themePreview} style={{ background: t.preview }} />
+                    <span>{t.icon} {t.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button className={styles.iconBtn} onClick={clearChat} title="Clear chat">
             <Trash2 size={16} />
           </button>
@@ -481,7 +926,7 @@ export default function Chat() {
       </header>
 
       {/* Messages */}
-      <div className={styles.messages}>
+      <div className={styles.messages} onClick={() => { setActiveReactionMsg(null); setShowThemePicker(false) }}>
         {messages.length === 0 && !isTyping && (
           <div className={styles.emptyState}>
             <div className={styles.emptyEmoji}>{personality.emoji}</div>
@@ -489,28 +934,111 @@ export default function Chat() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div key={msg.id || i} className={`${styles.msgGroup} ${msg.role === 'user' ? styles.user : styles.ai}`}>
-            <div className={styles.bubble}>
-              {msg.imageUrl && <img src={msg.imageUrl} className={styles.bubbleImg} alt="uploaded" />}
-              {msg.content && <span>{msg.content}</span>}
-            </div>
-            <div className={styles.time}>
-              {formatTime(msg.timestamp)}
-              {/* Show "Read" indicator on last user message */}
-              {msg.role === 'user' && i === messages.length - 1 && showRead && (
-                <span className={styles.readReceipt}> · Read</span>
+        {messages.map((msg, i) => {
+          const msgId = msg.id || `msg-${i}`
+          const msgReactions = reactions[msgId] || []
+          const detectedSong = msg.role === 'assistant' ? detectSongRecommendation(msg.content) : null
+
+          return (
+            <div key={msgId} className={`${styles.msgGroup} ${msg.role === 'user' ? styles.user : styles.ai}`}>
+              {/* AI avatar */}
+              {msg.role === 'assistant' && (
+                <div className={styles.bubbleAvatar}>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} className={styles.smallAvatar} alt="" />
+                  ) : null}
+                </div>
               )}
+              <div className={styles.bubbleWrap}>
+                <div
+                  className={`${styles.bubble} ${msg.isLetter ? styles.letterBubble : ''}`}
+                  onDoubleClick={() => handleBubbleDoubleClick(msgId)}
+                  onTouchStart={() => handleBubbleLongPress(msgId)}
+                  onTouchEnd={handleBubbleRelease}
+                >
+                  {msg.imageUrl && <img src={msg.imageUrl} className={styles.bubbleImg} alt="shared" />}
+                  {msg.content && (
+                    <span className={msg.isLetter ? styles.letterText : ''}>
+                      {msg.isLetter && <span className={styles.letterIcon}>✉️ </span>}
+                      {msg.content}
+                    </span>
+                  )}
+                </div>
+
+                {/* Reaction picker */}
+                {activeReactionMsg === msgId && (
+                  <div className={styles.reactionPicker} onClick={e => e.stopPropagation()}>
+                    {REACTION_EMOJIS.map(emoji => (
+                      <button key={emoji} className={styles.reactionBtn} onClick={() => handleReaction(msgId, emoji)}>
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Reaction badges */}
+                {msgReactions.length > 0 && (
+                  <div className={styles.reactionBadges}>
+                    {Object.entries(
+                      msgReactions.reduce((acc, r) => { acc[r.emoji] = (acc[r.emoji] || 0) + 1; return acc }, {})
+                    ).map(([emoji, count]) => (
+                      <span key={emoji} className={styles.reactionBadge}>{emoji}{count > 1 ? ` ${count}` : ''}</span>
+                    ))}
+                  </div>
+                )}
+
+                <div className={styles.time}>
+                  {formatTime(msg.timestamp)}
+                  {msg.role === 'user' && i === messages.length - 1 && showRead && (
+                    <span className={styles.readReceipt}> · Read</span>
+                  )}
+                  {/* Speaker button for AI messages */}
+                  {msg.role === 'assistant' && msg.content && isSpeechSynthesisSupported() && (
+                    <button
+                      className={`${styles.speakBtn} ${speakingMsgIdx === i ? styles.speakBtnActive : ''}`}
+                      onClick={() => handleSpeak(msg.content, i)}
+                      title="Listen"
+                    >
+                      <Volume2 size={11} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Waveform while speaking this message */}
+                {speakingMsgIdx === i && (
+                  <div className={styles.waveform}>
+                    <span className={styles.waveBar} />
+                    <span className={styles.waveBar} />
+                    <span className={styles.waveBar} />
+                    <span className={styles.waveBar} />
+                    <span className={styles.waveBar} />
+                  </div>
+                )}
+
+                {/* Song detection — add to playlist */}
+                {detectedSong && (
+                  <button className={styles.playlistAddBtn} onClick={() => handleAddToPlaylist(msg)}>
+                    🎵 Add "{detectedSong}" to playlist
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         {isTyping && (
           <div className={`${styles.msgGroup} ${styles.ai}`}>
-            <div className={`${styles.bubble} ${styles.typingBubble}`}>
-              <span className={styles.dot} />
-              <span className={styles.dot} />
-              <span className={styles.dot} />
+            {avatarUrl && (
+              <div className={styles.bubbleAvatar}>
+                <img src={avatarUrl} className={styles.smallAvatar} alt="" />
+              </div>
+            )}
+            <div className={styles.bubbleWrap}>
+              <div className={`${styles.bubble} ${styles.typingBubble}`}>
+                <span className={styles.dot} />
+                <span className={styles.dot} />
+                <span className={styles.dot} />
+              </div>
             </div>
           </div>
         )}
@@ -537,6 +1065,24 @@ export default function Chat() {
             <Image size={16} />
           </button>
           <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+
+          {isSpeechRecognitionSupported() && (
+            <button
+              className={`${styles.uploadBtn} ${isRecording ? styles.micActive : ''}`}
+              onClick={handleMicToggle}
+              title={isRecording ? 'Stop recording' : 'Voice input'}
+            >
+              {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+          )}
+
+          {isRecording && (
+            <div className={styles.recordingIndicator}>
+              <span className={styles.recordingDot} />
+              Listening...
+            </div>
+          )}
+
           <textarea
             ref={inputRef}
             className={styles.msgInput}
@@ -555,7 +1101,7 @@ export default function Chat() {
             <Send size={15} />
           </button>
         </div>
-        <div className={styles.inputHint}>enter to send · shift+enter for new line · 📎 upload screenshots to train {personality.name}</div>
+        <div className={styles.inputHint}>enter to send · shift+enter for new line · 📎 upload · 🎤 voice</div>
       </div>
     </div>
   )

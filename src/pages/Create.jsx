@@ -1,12 +1,12 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { saveCustomPersonality } from '../lib/db'
-import { ArrowLeft, Upload, X, Sparkles } from 'lucide-react'
+import { saveCustomPersonality, uploadAvatar } from '../lib/db'
+import { ArrowLeft, Upload, X, Sparkles, Camera } from 'lucide-react'
 import styles from './Create.module.css'
 
-const COLORS = ['#c084d4','#60a5fa','#fbbf24','#f87171','#34d399','#fb923c','#a78bfa','#f472b6']
-const EMOJIS = ['💜','🌸','❄️','☀️','🔥','🌙','⚡','🌺','💎','🦋']
+const COLORS = ['#c084d4', '#60a5fa', '#fbbf24', '#f87171', '#34d399', '#fb923c', '#a78bfa', '#f472b6']
+const EMOJIS = ['💜', '🌸', '❄️', '☀️', '🔥', '🌙', '⚡', '🌺', '💎', '🦋']
 
 export default function Create() {
   const { user } = useAuth()
@@ -22,7 +22,10 @@ export default function Create() {
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(null)
   const fileRef = useRef()
+  const avatarRef = useRef()
 
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files)
@@ -36,12 +39,14 @@ export default function Create() {
             const res = await fetch('/api/analyze-image', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageBase64: base64, mimeType: file.type,
-                prompt: 'Analyze this chat screenshot. Extract: texting style, vocabulary, emoji usage, personality traits, emotional patterns, how they express affection or frustration. Be specific.' })
+              body: JSON.stringify({
+                imageBase64: base64, mimeType: file.type,
+                prompt: 'Analyze this chat screenshot. Extract: texting style, vocabulary, emoji usage, personality traits, emotional patterns, how they express affection or frustration. Be specific.'
+              })
             })
             const data = await res.json()
             if (data.analysis) setUploads(prev => [...prev, { name: file.name, analysis: data.analysis }])
-          } catch(e) {}
+          } catch (e) { }
           resolve()
         }
         reader.readAsDataURL(file)
@@ -78,8 +83,18 @@ ${uploads.length > 0 ? `Analyzed chat patterns:\n${uploads.map(u => u.analysis).
         document.getElementById('generatedPrompt').value = data.reply
         alert('✦ System prompt generated! Review it below before saving.')
       }
-    } catch(e) { alert('Generation failed') }
+    } catch (e) { alert('Generation failed') }
     setGenerating(false)
+  }
+
+  const handleAvatarSelect = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setAvatarFile(file)
+    const reader = new FileReader()
+    reader.onload = (ev) => setAvatarPreview(ev.target.result)
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   const handleSave = async () => {
@@ -95,6 +110,11 @@ ${uploads.length > 0 ? `Analyzed chat patterns:\n${uploads.map(u => u.analysis).
       systemPrompt,
       isCustom: true
     })
+
+    // Upload avatar if selected
+    if (avatarFile) {
+      try { await uploadAvatar(user.uid, id, avatarFile) } catch (e) { console.error('Avatar upload error:', e) }
+    }
 
     navigate(`/chat/${id}`)
   }
@@ -120,7 +140,7 @@ Keep responses natural — like real texting.`
       <div className={styles.glow} />
       <header className={styles.header}>
         <button className={styles.backBtn} onClick={() => navigate('/')}>
-          <ArrowLeft size={18}/>
+          <ArrowLeft size={18} />
         </button>
         <h1 className={styles.title}>Create Your Own</h1>
       </header>
@@ -147,6 +167,25 @@ Keep responses natural — like real texting.`
             <textarea className={styles.textarea} placeholder="Description — who is she? What's your story?" value={description} onChange={e => setDescription(e.target.value)} rows={3} />
           </section>
 
+          {/* Avatar */}
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Her Photo <span className={styles.optional}>(optional)</span></h2>
+            <p className={styles.sectionSub}>Upload a photo to use as her avatar in chat.</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {avatarPreview ? (
+                <img src={avatarPreview} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)' }} alt="avatar" />
+              ) : (
+                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--bg3)', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Camera size={20} style={{ color: 'var(--text-faint)' }} />
+                </div>
+              )}
+              <button className={styles.uploadBtn} onClick={() => avatarRef.current?.click()} type="button">
+                <Upload size={16} /> {avatarPreview ? 'Change Photo' : 'Upload Photo'}
+              </button>
+              <input ref={avatarRef} type="file" accept="image/*" onChange={handleAvatarSelect} style={{ display: 'none' }} />
+            </div>
+          </section>
+
           {/* Personality */}
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Personality Traits</h2>
@@ -160,14 +199,14 @@ Keep responses natural — like real texting.`
             <h2 className={styles.sectionTitle}>Upload Chat Screenshots <span className={styles.optional}>(optional)</span></h2>
             <p className={styles.sectionSub}>Upload screenshots of real chats — Nexus will analyze her texting style, personality, and patterns to recreate her more accurately.</p>
             <button className={styles.uploadBtn} onClick={() => fileRef.current?.click()} disabled={uploading}>
-              <Upload size={18}/>
+              <Upload size={18} />
               {uploading ? 'Analyzing...' : 'Upload Screenshots'}
             </button>
-            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} style={{display:'none'}} />
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleUpload} style={{ display: 'none' }} />
             {uploads.map((u, i) => (
               <div key={i} className={styles.uploadItem}>
                 <span className={styles.uploadName}>✦ {u.name}</span>
-                <button onClick={() => setUploads(prev => prev.filter((_,j) => j !== i))}><X size={14}/></button>
+                <button onClick={() => setUploads(prev => prev.filter((_, j) => j !== i))}><X size={14} /></button>
               </div>
             ))}
           </section>
@@ -176,7 +215,7 @@ Keep responses natural — like real texting.`
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>System Prompt</h2>
             <button className={styles.generateBtn} onClick={generatePrompt} disabled={generating}>
-              <Sparkles size={16}/>
+              <Sparkles size={16} />
               {generating ? 'Generating...' : 'Auto-generate from above ✦'}
             </button>
             <textarea id="generatedPrompt" className={styles.textarea}

@@ -207,3 +207,286 @@ export async function saveEngagement(uid, personalityId, state) {
       { onConflict: 'uid,personalityId' })
   if (error) throw error
 }
+
+// ── Message Reactions ──────────────────────────────────────────
+export async function addReaction(messageId, userId, emoji) {
+  const { error } = await supabase
+    .from('message_reactions')
+    .insert([{ message_id: messageId, user_id: userId, emoji }])
+  if (error) throw error
+}
+
+export async function removeReaction(messageId, userId, emoji) {
+  const { error } = await supabase
+    .from('message_reactions')
+    .delete()
+    .eq('message_id', messageId)
+    .eq('user_id', userId)
+    .eq('emoji', emoji)
+  if (error) throw error
+}
+
+export async function loadReactions(messageIds) {
+  if (!messageIds.length) return {}
+  const { data, error } = await supabase
+    .from('message_reactions')
+    .select('*')
+    .in('message_id', messageIds)
+  if (error) return {}
+  // Group by message_id
+  const grouped = {}
+  for (const r of (data || [])) {
+    if (!grouped[r.message_id]) grouped[r.message_id] = []
+    grouped[r.message_id].push(r)
+  }
+  return grouped
+}
+
+// ── Active Game ────────────────────────────────────────────────
+export async function loadActiveGame(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('active_game')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') return null
+  return data || null
+}
+
+export async function saveActiveGame(uid, personalityId, gameName) {
+  const { error } = await supabase
+    .from('active_game')
+    .upsert([{ user_id: uid, personality_id: personalityId, game_name: gameName, started_at: new Date().toISOString() }],
+      { onConflict: 'user_id,personality_id' })
+  if (error) throw error
+}
+
+export async function clearActiveGame(uid, personalityId) {
+  const { error } = await supabase
+    .from('active_game')
+    .delete()
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+  if (error) throw error
+}
+
+// ── Milestones ─────────────────────────────────────────────────
+export async function loadMilestones(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('milestones')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .order('unlocked_at', { ascending: true })
+  if (error) return []
+  return data || []
+}
+
+export async function saveMilestone(uid, personalityId, levelReached) {
+  const { error } = await supabase
+    .from('milestones')
+    .insert([{ user_id: uid, personality_id: personalityId, level_reached: levelReached }])
+  if (error) throw error
+}
+
+// ── Conflict State ─────────────────────────────────────────────
+export async function loadConflictState(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('conflict_state')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') return null
+  return data || null
+}
+
+export async function saveConflictState(uid, personalityId, stage) {
+  const { error } = await supabase
+    .from('conflict_state')
+    .upsert([{ user_id: uid, personality_id: personalityId, stage, started_at: new Date().toISOString() }],
+      { onConflict: 'user_id,personality_id' })
+  if (error) throw error
+}
+
+export async function clearConflictState(uid, personalityId) {
+  const { error } = await supabase
+    .from('conflict_state')
+    .delete()
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+  if (error) throw error
+}
+
+// ── Playlist ───────────────────────────────────────────────────
+export async function loadPlaylist(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('playlist')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .order('added_at', { ascending: false })
+  if (error) return []
+  return data || []
+}
+
+export async function addToPlaylist(uid, personalityId, songName, herMessage) {
+  const { error } = await supabase
+    .from('playlist')
+    .insert([{ user_id: uid, personality_id: personalityId, song_name: songName, her_message: herMessage }])
+  if (error) throw error
+}
+
+export async function removeFromPlaylist(id) {
+  const { error } = await supabase
+    .from('playlist')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
+// ── Diary Entries ──────────────────────────────────────────────
+export async function loadDiaryEntries(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('diary_entries')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return data || []
+}
+
+export async function saveDiaryEntry(uid, personalityId, entryText) {
+  const { error } = await supabase
+    .from('diary_entries')
+    .insert([{ user_id: uid, personality_id: personalityId, entry_text: entryText }])
+  if (error) throw error
+}
+
+export async function getLatestDiaryEntry(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('diary_entries')
+    .select('created_at')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+  if (error && error.code !== 'PGRST116') return null
+  return data || null
+}
+
+// ── User Settings (per personality) ────────────────────────────
+export async function loadUserSettings(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('user_settings')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') return null
+  return data || null
+}
+
+export async function saveUserSettings(uid, personalityId, settings) {
+  const { error } = await supabase
+    .from('user_settings')
+    .upsert([{ user_id: uid, personality_id: personalityId, ...settings, updated_at: new Date().toISOString() }],
+      { onConflict: 'user_id,personality_id' })
+  if (error) throw error
+}
+
+// ── Avatar Upload (Supabase Storage) ───────────────────────────
+export async function uploadAvatar(uid, personalityId, file) {
+  const path = `${uid}/${personalityId}`
+  const { error } = await supabase.storage
+    .from('avatars')
+    .upload(path, file, { upsert: true })
+  if (error) throw error
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+  return data.publicUrl
+}
+
+export async function getAvatarUrl(uid, personalityId) {
+  const path = `${uid}/${personalityId}`
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+  // Check if file exists by trying to fetch
+  try {
+    const res = await fetch(data.publicUrl, { method: 'HEAD' })
+    return res.ok ? data.publicUrl + '?t=' + Date.now() : null
+  } catch {
+    return null
+  }
+}
+
+// ── User Fields (birthday, first_conversation_date) ────────────
+export async function setFirstConversationDate(uid) {
+  const { data } = await supabase
+    .from('users')
+    .select('first_conversation_date')
+    .eq('id', uid)
+    .single()
+  if (data?.first_conversation_date) return // Already set
+  await supabase
+    .from('users')
+    .update({ first_conversation_date: new Date().toISOString().split('T')[0] })
+    .eq('id', uid)
+}
+
+export async function getFirstConversationDate(uid) {
+  const { data } = await supabase
+    .from('users')
+    .select('first_conversation_date')
+    .eq('id', uid)
+    .single()
+  return data?.first_conversation_date || null
+}
+
+export async function setBirthday(uid, birthday) {
+  const { error } = await supabase
+    .from('users')
+    .update({ birthday })
+    .eq('id', uid)
+  if (error) throw error
+}
+
+export async function getBirthday(uid) {
+  const { data } = await supabase
+    .from('users')
+    .select('birthday')
+    .eq('id', uid)
+    .single()
+  return data?.birthday || null
+}
+
+// ── Communication Profile (adaptive tuning) ────────────────────
+export async function loadCommunicationProfile(uid, personalityId) {
+  const { data, error } = await supabase
+    .from('user_communication_profile')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('personality_id', personalityId)
+    .single()
+  if (error && error.code !== 'PGRST116') return null
+  return data || null
+}
+
+export async function saveCommunicationProfile(uid, personalityId, profile, lastAnalyzedAt) {
+  const { error } = await supabase
+    .from('user_communication_profile')
+    .upsert([{
+      user_id: uid,
+      personality_id: personalityId,
+      humor_style: profile.humor_style || null,
+      engaging_topics: profile.engaging_topics || null,
+      communication_style: profile.communication_style || null,
+      emotional_tone: profile.emotional_tone || null,
+      needs: profile.needs || null,
+      responsiveness: profile.responsiveness || null,
+      last_analyzed_at: lastAnalyzedAt,
+      updated_at: new Date().toISOString()
+    }], { onConflict: 'user_id,personality_id' })
+  if (error) throw error
+}
