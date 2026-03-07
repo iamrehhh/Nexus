@@ -65,7 +65,8 @@ export async function saveMessage(uid, personalityId, role, content, imageUrl = 
       personalityId,
       role,
       content,
-      imageUrl
+      imageUrl,
+      timestamp: new Date().toISOString()
     }])
   if (error) throw error
 }
@@ -76,10 +77,12 @@ export async function loadMessages(uid, personalityId, limitCount = 80) {
     .select('*')
     .eq('uid', uid)
     .eq('personalityId', personalityId)
-    .order('timestamp', { ascending: true })
+    .order('timestamp', { ascending: false })
     .limit(limitCount)
   if (error) throw error
-  return data || []
+
+  // Reverse to chronological order after getting safest recent messages
+  return (data || []).reverse()
 }
 
 export async function clearMessages(uid, personalityId) {
