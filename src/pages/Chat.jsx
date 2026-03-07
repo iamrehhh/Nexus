@@ -667,14 +667,14 @@ ${isUnreachable ? '- RIGHT NOW you are slightly distracted/elsewhere. Keep repli
         const sysPrompt = buildSystemPrompt()
         const stage = getRelationshipStage(engagementRef.current.totalMessages)
         const silencePrompt = stage <= 1
-          ? "You haven't heard from him for a bit. You're curious but not invested. Maybe send a casual message — something light, not clingy. You barely know him."
+          ? "He hasn't replied. You barely know him. If you text at all, it's something extremely short and casual — 'hey' or just a stray thought. Do NOT say 'checking in', 'hope you're doing well', or anything that sounds like customer service. Maximum one short sentence."
           : stage <= 2
-            ? "He's been quiet. You're friendly enough to check in casually. Short and natural."
-            : "You haven't heard from him in a while. Initiate naturally — check in, share a thought, flirt, or just say hi. Short and real."
+            ? "He's been quiet. Something in your day just happened or you noticed something — text him about THAT specific thing. NOT 'just checking in'. NOT 'hope you're doing okay'. Something real and specific from your life right now. One sentence max."
+            : "It's been quiet. You're in the middle of something — text him about what you're actually doing or thinking right now. A specific observation, a memory, a thing that just happened. NEVER say 'checking in' or 'hope you're doing well'. Those phrases are banned. One specific real thing, 1-2 sentences."
         const reply = await callAPI([
           ...history,
           { role: 'user', content: silencePrompt }
-        ], sysPrompt, 120)
+        ], sysPrompt, 60)
         await addMessage('assistant', reply)
         playInitiationChime()
       } catch (e) { }
