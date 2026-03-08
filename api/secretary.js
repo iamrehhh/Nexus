@@ -78,7 +78,8 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { message, userId, conversationHistory, userName } = req.body
+        const { message, userId, conversationHistory, userName, timezone } = req.body
+        const userTimezone = timezone || 'Asia/Kolkata'
 
         if (!message || !userId) {
             return res.status(400).json({ error: 'Missing required fields' })
@@ -403,7 +404,7 @@ export default async function handler(req, res) {
         // 6. Build system prompt
         const currentTime = new Date().toLocaleString('en-US', {
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-            hour: 'numeric', minute: '2-digit', timeZoneName: 'short'
+            hour: 'numeric', minute: '2-digit', timeZone: userTimezone, timeZoneName: 'short'
         })
 
         const systemPrompt = `You are the personal secretary for ${userName || 'the user'}. ${toneInstructions[secretaryTone] || toneInstructions.professional} You speak plainly — no filler words, no padding, no "Certainly!" or "Great question!". Just respond directly.
@@ -446,7 +447,7 @@ Current context:
                         properties: {
                             title: { type: 'string', description: 'A short, clear title for the reminder (e.g., "Doctor Appointment", "Call Mom")' },
                             description: { type: 'string', description: 'Any extra details or context for the reminder.' },
-                            due_date: { type: 'string', description: 'The absolute ISO 8601 string for the date and time of the reminder (e.g., "2026-03-09T14:30:00.000Z"). Make sure to calculate this accurately based on the current time provided in the system prompt.' }
+                            due_date: { type: 'string', description: `The absolute ISO 8601 datetime string for the reminder. CRITICAL: The current time in the system prompt is already shown in the user's local timezone (${userTimezone}). You MUST convert the user's requested time to UTC when producing the ISO string. For example: if current time shows 9:00 PM IST and user says "remind me in 1 hour", the reminder is 10:00 PM IST = 4:30 PM UTC, so output "2026-03-08T16:30:00.000Z". Always subtract the UTC offset of ${userTimezone} to get the correct UTC time.` }
                         },
                         required: ['title', 'due_date']
                     }
@@ -481,7 +482,7 @@ Current context:
                             due_date: args.due_date
                         }])
 
-                        const formattedDate = new Date(args.due_date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                        const formattedDate = new Date(args.due_date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: userTimezone })
 
                         // If there was no text content, formulate a default reply
                         if (!reply.trim()) {

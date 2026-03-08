@@ -80,6 +80,7 @@ export default function Secretary() {
                     userId: user.uid,
                     conversationHistory: recentHistory,
                     userName: firstName,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 })
             })
 
@@ -149,17 +150,21 @@ export default function Secretary() {
     }
 
     const formatReminderDate = (isoStr) => {
+        const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone
         const d = new Date(isoStr)
-        const today = new Date()
-        const tmrw = new Date(today)
+
+        const todayStr = new Date().toLocaleDateString('en-US', { timeZone: userTz })
+        const tmrw = new Date()
         tmrw.setDate(tmrw.getDate() + 1)
+        const tmrwStr = tmrw.toLocaleDateString('en-US', { timeZone: userTz })
+        const dStr = d.toLocaleDateString('en-US', { timeZone: userTz })
 
         let prefix = ''
-        if (d.toDateString() === today.toDateString()) prefix = 'Today, '
-        else if (d.toDateString() === tmrw.toDateString()) prefix = 'Tomorrow, '
-        else prefix = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', '
+        if (dStr === todayStr) prefix = 'Today, '
+        else if (dStr === tmrwStr) prefix = 'Tomorrow, '
+        else prefix = d.toLocaleDateString('en-US', { timeZone: userTz, month: 'short', day: 'numeric' }) + ', '
 
-        return prefix + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        return prefix + d.toLocaleTimeString('en-US', { timeZone: userTz, hour: 'numeric', minute: '2-digit' })
     }
 
     const showQuickActions = messages.length === 0 || (!input && !sending)
