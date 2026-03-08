@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { loadTasks, addTask, completeTask, getTodayTaskCount, getPendingTaskCount, getMemoryCount, loadUpcomingReminders, getLastReadBook, getHealthCheckins, getHealthMetricsConfig } from '../lib/db'
 import { CheckSquare, Clock, Brain, Calendar as CalendarIcon, Plus, Send, BookOpen, Activity } from 'lucide-react'
+import SpotifyPlayer from '../components/SpotifyPlayer'
 import toast from 'react-hot-toast'
 
 export default function Dashboard() {
@@ -368,6 +369,7 @@ export default function Dashboard() {
                 __html: `
                 .hover-opacity-100:hover { opacity: 1 !important; }
             `}} />
+            <SpotifyPlayer />
         </div>
     )
 }

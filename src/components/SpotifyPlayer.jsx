@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Music, Maximize2, Minimize2, Volume2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 
 export default function SpotifyPlayer() {
@@ -122,22 +123,27 @@ export default function SpotifyPlayer() {
 
     // Mini Player
     return (
-        <div style={s.miniPlayer}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, overflow: 'hidden', cursor: 'pointer' }} onClick={() => setExpanded(true)}>
+        <motion.div
+            drag
+            dragMomentum={false}
+            whileDrag={{ scale: 1.05, cursor: 'grabbing' }}
+            style={{ ...s.miniPlayer, cursor: 'grab' }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, overflow: 'hidden' }} onClick={() => setExpanded(true)}>
                 <div style={{ width: 40, height: 40, borderRadius: 6, overflow: 'hidden', background: 'var(--bg2)', flexShrink: 0 }}>
                     {albumArt ? (
-                        <img src={albumArt} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <img src={albumArt} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
                     ) : (
                         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={16} style={{ color: 'var(--text-faint)' }} /></div>
                     )}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{trackName}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{artistName}</div>
                 </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onPointerDown={(e) => e.stopPropagation()}>
                 <button onClick={() => handleControl('previous')} style={s.miniCtrlBtn}><SkipBack size={16} /></button>
                 <button onClick={() => handleControl(isPlaying ? 'pause' : 'play')} style={s.miniPlayBtn}>
                     {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />}
@@ -146,7 +152,7 @@ export default function SpotifyPlayer() {
             </div>
 
             <div style={{ position: 'absolute', bottom: 0, left: 0, height: 2, background: '#1DB954', width: `${progressPct}%`, transition: 'width 1s linear' }} />
-        </div>
+        </motion.div>
     );
 }
 
