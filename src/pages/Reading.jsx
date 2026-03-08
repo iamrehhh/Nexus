@@ -47,7 +47,7 @@ export default function Reading() {
 
     // Polling for processing books
     useEffect(() => {
-        const hasProcessing = books.some(b => b.status === 'processing')
+        const hasProcessing = books.some(b => b.status === 'processing' || b.status === 'partial')
         if (!hasProcessing) return
 
         const interval = setInterval(() => {
@@ -373,13 +373,151 @@ function UploadModal({ user, onClose, onSuccess }) {
     const [coverColor, setCoverColor] = useState('#6366f1')
     const [goalDate, setGoalDate] = useState('')
 
-    // Upload state: 'idle' | 'uploading' | 'saving' | 'processing' | 'error'
+    // Upload state: 'idle' | 'uploading' | 'extracting' | 'saving' | 'done' | 'error'
     const [uploadState, setUploadState] = useState('idle')
     const [uploadProgress, setUploadProgress] = useState(0)
+    const [extractProgress, setExtractProgress] = useState(0)
+    const [totalPages, setTotalPages] = useState(0)
     const [statusText, setStatusText] = useState('')
     const [errorText, setErrorText] = useState('')
     const fileRef = useRef(null)
     const dropRef = useRef(null)
+
+    const handleFile = (f) => {
+        if (!f || !f.name.endsWith('.pdf')) {
+            setErrorText('Only PDF files are accepted')
+            return
+        }
+        if (f.size > 100 * 1024 * 1024) {
+            setErrorText('File too large. Maximum 100MB.')
+            return
+        }
+        setFile(f)
+        setErrorText('')
+        if (!title) setTitle(f.name.replace('.pdf', ''))
+    }
+
+    const handleDrop = (e) => {
+        e.preventDefault()
+        const f = e.dataTransfer.files[0]
+        if (f) handleFile(f)
+    }
+
+    const handleUpload = async () => {
+        if (!file || !title.trim()) return
+        setErrorText('')
+
+        try {
+            // STEP 1: Extract text in the browser using pdfjs-dist
+            setUploadState('extracting')
+            setStatusText('Reading PDF...')
+
+            const pdfjsLib = await import('pdfjs-dist')
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+
+            const arrayBuffer = await file.arrayBuffer()
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+            const numPages = pdf.numPages
+            setTotalPages(numPages)
+            setStatusText(`Extracting pages... 0 of ${numPages}`)
+
+            const pages = []
+            for (let i = 1; i <= numPages; i++) {
+                const page = await pdf.getPage(i)
+                const textContent = await page.getTextContent()
+                const pageText = textContent.items.map(item => item.str).join(' ').trim()
+                pages.push(pageText)
+                setExtractProgress(i)
+                setStatusText(`Extracting pages... ${i} of ${numPages}`)
+            }
+
+            const totalWords = pages.reduce((sum, p) => sum + p.split(/\s+/).filter(Boolean).length, 0)
+
+            // STEP 2: Upload PDF file to Supabase Storage
+            setUploadState('uploading')
+            setUploadProgress(0)
+            setStatusText('Uploading PDF...')
+
+            const tempId = crypto.randomUUID()
+            const filePath = `${user.uid}/${tempId}.pdf`
+
+            const progressInterval = setInterval(() => {
+                setUploadProgress(prev => {
+                    const next = prev + (100 - prev) * 0.15
+                    return next > 92 ? 92 : next
+                })
+            }, 400)
+
+            const { error: uploadErr } = await supabase.storage
+                .from('books')
+                .upload(filePath, file, { upsert: true, cacheControl: '3600' })
+
+            clearInterval(progressInterval)
+            if (uploadErr) throw uploadErr
+            setUploadProgress(100)
+
+            // STEP 3: Create book record
+            setUploadState('saving')
+            setStatusText('Saving book...')
+
+            const { data: book, error: createError } = await supabase
+                .from('books')
+                .insert([{
+                    user_id: user.uid,
+                    title: title.trim(),
+                    author: author.trim() || null,
+                    cover_color: coverColor,
+                    reading_goal_date: goalDate || null,
+                    status: 'processing',
+                    file_path: filePath,
+                    total_pages: numPages,
+                    word_count: totalWords,
+                }])
+                .select()
+                .single()
+
+            if (createError) throw createError
+
+            // STEP 4: Save all pages directly to Supabase in chunks of 100
+            setStatusText('Saving pages to library...')
+
+            const CHUNK_SIZE = 100
+            const allPageRows = pages.map((content, idx) => ({
+                book_id: book.id,
+                page_number: idx + 1,
+                content,
+                word_count: content.split(/\s+/).filter(Boolean).length,
+            }))
+
+            for (let i = 0; i < allPageRows.length; i += CHUNK_SIZE) {
+                const chunk = allPageRows.slice(i, i + CHUNK_SIZE)
+                const { error: insertErr } = await supabase
+                    .from('book_pages')
+                    .upsert(chunk, { onConflict: 'book_id,page_number' })
+                if (insertErr) throw insertErr
+            }
+
+            // STEP 5: Mark book as ready
+            await supabase
+                .from('books')
+                .update({
+                    status: 'ready',
+                    last_processed_page: numPages,
+                    processing_error: null,
+                })
+                .eq('id', book.id)
+
+            setUploadState('done')
+            setStatusText(`Done! ${numPages} pages extracted.`)
+            toast.success('Book ready to read!')
+            onSuccess({ ...book, status: 'ready', total_pages: numPages })
+
+        } catch (err) {
+            console.error('Upload error:', err)
+            setErrorText('Upload failed — ' + (err.message || 'file may be corrupted'))
+            setUploadState('error')
+        }
+    }
 
     const handleFile = (f) => {
         if (!f || !f.name.endsWith('.pdf')) {
@@ -401,111 +539,8 @@ function UploadModal({ user, onClose, onSuccess }) {
         if (f) handleFile(f)
     }
 
-    const processNextBatch = async (bookId, filePath) => {
-        try {
-            const res = await fetch('/api/pdf-extract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    bookId,
-                    userId: user.uid,
-                    filePath,
-                })
-            });
-
-            if (!res.ok) {
-                console.error("Batch processing failed", await res.text());
-                return;
-            }
-
-            const data = await res.json();
-            if (!data.isDone && data.success) {
-                // Process next batch
-                processNextBatch(bookId, filePath);
-            }
-        } catch (err) {
-            console.error("Error in background pdf extract:", err);
-        }
-    };
-
-    const handleUpload = async () => {
-        if (!file || !title.trim()) return
-        setUploadState('saving')
-        setStatusText('Saving book...')
-        setErrorText('')
-
-        try {
-            // 1. Upload to Supabase Storage first
-            setUploadState('uploading')
-            setStatusText(`Uploading... 0%`)
-            const tempId = crypto.randomUUID()
-            const filePath = `${user.uid}/${tempId}.pdf`
-
-            // Note: we can't use onUploadProgress easily with the standard JS supabase client
-            // unless we're using TUS resumable uploads (which we aren't).
-            // But we can approximate it or use it if supported. The prompt mentions onUploadProgress:
-            // "supabase.storage.from('books').upload(path, file, { onUploadProgress: ... })"
-            // We will attempt to use it, though it might only be supported in newer supabase-js via fetch overrides.
-
-            // To be safe, we'll build a synthetic loader or check if it actually triggers.
-            let simulatedProgressInterval = setInterval(() => {
-                setUploadProgress((prev) => {
-                    const next = prev + (100 - prev) * 0.1;
-                    setStatusText(`Uploading... ${Math.round(next)}%`);
-                    return next > 95 ? 95 : next;
-                })
-            }, 500);
-
-            const { error: uploadErr } = await supabase.storage
-                .from('books')
-                .upload(filePath, file, {
-                    upsert: true,
-                    cacheControl: '3600'
-                })
-
-            clearInterval(simulatedProgressInterval);
-
-            if (uploadErr) throw uploadErr
-
-            setUploadProgress(100)
-            setStatusText('Saving book record...')
-            setUploadState('saving')
-
-            // 2. Create book record immediately with status = processing
-            const { data: book, error: createError } = await supabase
-                .from('books')
-                .insert([{
-                    user_id: user.uid,
-                    title: title.trim(),
-                    author: author.trim(),
-                    cover_color: coverColor,
-                    reading_goal_date: goalDate || null,
-                    status: 'processing',
-                    file_path: filePath
-                }])
-                .select()
-                .single()
-
-            if (createError) throw createError
-
-            // 3. Extract text asynchronously (fire and forget!)
-            setUploadState('processing')
-            setStatusText('Book added! Extracting pages in background.')
-
-            processNextBatch(book.id, filePath);
-
-            toast.success('Book uploaded! Processing started in background.')
-            onSuccess(book)
-
-        } catch (err) {
-            console.error('Upload error:', err)
-            setErrorText('Upload failed — file may be too large or corrupted')
-            setUploadState('error')
-        }
-    }
-
     return (
-        <div style={styles.modalOverlay} onClick={() => uploadState !== 'uploading' && uploadState !== 'saving' ? onClose() : null}>
+        <div style={styles.modalOverlay} onClick={() => uploadState !== 'uploading' && uploadState !== 'extracting' && uploadState !== 'saving' ? onClose() : null}>
             <div style={styles.modal} onClick={e => e.stopPropagation()}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                     <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Add Book</h2>
@@ -544,11 +579,35 @@ function UploadModal({ user, onClose, onSuccess }) {
                     // Upload Progress View
                     <div style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
                         <div style={{ marginBottom: 16 }}>
-                            {uploadState === 'processing' ? (
-                                <BookOpen size={32} style={{ color: 'var(--accent-green)' }} />
-                            ) : uploadState === 'saving' ? (
-                                <div style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+                            {uploadState === 'done' ? (
+                                <BookOpen size={32} style={{ color: 'var(--accent-green)', margin: '0 auto' }} />
                             ) : (
+                                <div style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+                            )}
+                        </div>
+                        {uploadState === 'extracting' && totalPages > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                                <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+                                    <div style={{ width: `${Math.round((extractProgress / totalPages) * 100)}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.2s ease' }} />
+                                </div>
+                                <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{extractProgress} / {totalPages} pages</span>
+                            </div>
+                        )}
+                        {uploadState === 'uploading' && (
+                            <div style={{ marginBottom: 12 }}>
+                                <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                                    <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease' }} />
+                                </div>
+                            </div>
+                        )}
+                        <p style={{ fontSize: 15, fontWeight: 500, color: 'var(--text)' }}>{statusText}</p>
+                        {uploadState === 'done' && (
+                            <button onClick={() => onClose()} style={{ ...styles.addBtn, marginTop: 24, margin: '24px auto 0' }}>
+                                View in Library
+                            </button>
+                        )}
+                    </div>
+                )}
                                 <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
                                     <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease' }} />
                                 </div>
