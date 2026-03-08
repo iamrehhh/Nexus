@@ -1,5 +1,5 @@
 // src/components/SpotifyPlayer.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Music, Maximize2, Minimize2, Volume2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { motion } from 'framer-motion';
@@ -10,18 +10,44 @@ export default function SpotifyPlayer() {
     const [playback, setPlayback] = useState(null);
     const [expanded, setExpanded] = useState(false);
     const [loading, setLoading] = useState(true);
+    const errorCountRef = useRef(0);
+    const intervalRef = useRef(null);
 
     const fetchPlayback = async () => {
+        if (errorCountRef.current >= 3) return;
+
         try {
             const res = await fetch(`/api/spotify?userId=${user.uid}`);
             if (res.ok) {
                 const data = await res.json();
                 setPlayback(data.playback);
+                errorCountRef.current = 0; // Reset on success
+
+                if (!intervalRef.current) {
+                    intervalRef.current = setInterval(fetchPlayback, 5000);
+                }
+            } else if (res.status === 401) {
+                setPlayback(null);
+                if (intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                }
+                errorCountRef.current = 3; // Force stop on unauthorized
             } else {
                 setPlayback(null);
+                errorCountRef.current += 1;
+                if (errorCountRef.current >= 3 && intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                }
             }
         } catch (e) {
             console.error('Failed to fetch playback state', e);
+            errorCountRef.current += 1;
+            if (errorCountRef.current >= 3 && intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
         } finally {
             setLoading(false);
         }
@@ -29,9 +55,15 @@ export default function SpotifyPlayer() {
 
     useEffect(() => {
         if (!user) return;
+        errorCountRef.current = 0;
         fetchPlayback();
-        const interval = setInterval(fetchPlayback, 5000); // Polling every 5s
-        return () => clearInterval(interval);
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
     }, [user]);
 
     const handleControl = async (action) => {
