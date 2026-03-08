@@ -9,7 +9,6 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 import { useCommandBar } from '../hooks/useCommandBar'
-import SpotifyPlayer from './SpotifyPlayer'
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -483,9 +482,6 @@ export default function Layout({ children }) {
                 </>
             )}
 
-            {/* Spotify Player */}
-            <SpotifyPlayer />
-
             {/* Floating Action Button */}
             <div ref={fabRef} style={{
                 position: 'fixed', right: 24, bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))', zIndex: 900
@@ -501,7 +497,7 @@ export default function Layout({ children }) {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface)', border: '1px solid var(--border)',
                             color: 'var(--text)', padding: '10px 16px', borderRadius: 24, cursor: 'pointer',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer', whiteSpace: 'nowrap',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', whiteSpace: 'nowrap',
                             opacity: fabOpen ? 1 : 0, transform: fabOpen ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.8)',
                             transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.1s'
                         }}
@@ -530,7 +526,7 @@ export default function Layout({ children }) {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface)', border: '1px solid var(--border)',
                             color: 'var(--text)', padding: '10px 16px', borderRadius: 24, cursor: 'pointer',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer', whiteSpace: 'nowrap',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', whiteSpace: 'nowrap',
                             opacity: fabOpen ? 1 : 0, transform: fabOpen ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.8)',
                             transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.05s'
                         }}
@@ -545,7 +541,7 @@ export default function Layout({ children }) {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface)', border: '1px solid var(--border)',
                             color: 'var(--text)', padding: '10px 16px', borderRadius: 24, cursor: 'pointer',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer', whiteSpace: 'nowrap',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', whiteSpace: 'nowrap',
                             opacity: fabOpen ? 1 : 0, transform: fabOpen ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.8)',
                             transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0s'
                         }}
