@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { createClient } from '@supabase/supabase-js'
+import { getSpotifyClient } from './services.js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const supabase = createClient(
@@ -17,6 +18,52 @@ export default async function handler(req, res) {
 
         if (!message || !userId) {
             return res.status(400).json({ error: 'Missing required fields' })
+        }
+
+        const lowerMsg = message.toLowerCase().trim()
+
+        // 0. Quick Action: Spotify Control Intents
+        const spotifyPlayIntents = ['play music', 'play spotify', 'resume music', 'resume spotify']
+        const spotifyPauseIntents = ['pause music', 'pause spotify', 'stop music', 'stop spotify']
+        const spotifyNextIntents = ['next song', 'skip song', 'next track', 'skip track']
+        const spotifyPrevIntents = ['previous song', 'last song', 'previous track', 'go back a song']
+
+        if (
+            spotifyPlayIntents.includes(lowerMsg) ||
+            spotifyPauseIntents.includes(lowerMsg) ||
+            spotifyNextIntents.includes(lowerMsg) ||
+            spotifyPrevIntents.includes(lowerMsg)
+        ) {
+            try {
+                const spotifyApi = await getSpotifyClient(userId)
+                if (spotifyApi) {
+                    let replyText = 'Done.'
+                    if (spotifyPlayIntents.includes(lowerMsg)) {
+                        await spotifyApi.play()
+                        replyText = 'Playing your music.'
+                    } else if (spotifyPauseIntents.includes(lowerMsg)) {
+                        await spotifyApi.pause()
+                        replyText = 'Paused the music.'
+                    } else if (spotifyNextIntents.includes(lowerMsg)) {
+                        await spotifyApi.skipToNext()
+                        replyText = 'Skipped to the next song.'
+                    } else if (spotifyPrevIntents.includes(lowerMsg)) {
+                        await spotifyApi.skipToPrevious()
+                        replyText = 'Went back to the previous song.'
+                    }
+
+                    // Save messages
+                    await supabase.from('secretary_messages').insert([
+                        { user_id: userId, role: 'user', content: message },
+                        { user_id: userId, role: 'assistant', content: replyText },
+                    ])
+
+                    return res.status(200).json({ reply: replyText })
+                }
+            } catch (err) {
+                console.error('Spotify Intent Error:', err)
+                // Fall through to normal GPT response if it fails
+            }
         }
 
         // 1. Embed the user message for RAG search
@@ -122,6 +169,36 @@ export default async function handler(req, res) {
             }
         } catch (e) { }
 
+        // 4.6.5. Fetch Custom Health Tables Context
+        let customTablesContext = ''
+        try {
+            const { data: tables } = await supabase
+                .from('health_tables')
+                .select('id, title, columns')
+                .eq('user_id', userId)
+
+            if (tables && tables.length > 0) {
+                const tableContexts = await Promise.all(tables.slice(0, 3).map(async t => {
+                    const { data: rows } = await supabase
+                        .from('health_table_rows')
+                        .select('data')
+                        .eq('table_id', t.id)
+                        .order('created_at', { ascending: false })
+                        .limit(3)
+
+                    if (!rows || rows.length === 0) return `${t.title} (0 rows)`
+
+                    // only show top few cols
+                    const topCols = t.columns.slice(0, 3)
+                    const rowSummaries = rows.map(r =>
+                        topCols.map(c => `${c.name}: ${r.data[c.id] || '-'}`).join(', ')
+                    ).join(' | ')
+                    return `${t.title} [Recent rows: ${rowSummaries}]`
+                }))
+                customTablesContext = tableContexts.join('\n  - ')
+            }
+        } catch (e) { }
+
         // 4.7. Fetch Connected Services Context
         let connectedServicesContext = []
         try {
@@ -195,27 +272,44 @@ export default async function handler(req, res) {
         let vaultContext = ''
         let vaultSummary = '0 active notes'
         try {
-            const { count } = await supabase.from('vault_notes').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('is_archived', false)
+            const { count } = await supabase.from('vault_files').select('*', { count: 'exact', head: true }).eq('user_id', userId)
             vaultSummary = `${count || 0} active notes`
 
             const vaultKeywords = ["note", "wrote", "writing", "saved", "vault", "idea i had", "what did i", "find my", "remember when i", "search"]
-            const lowerMsg = message.toLowerCase()
             if (vaultKeywords.some(kw => lowerMsg.includes(kw))) {
+
                 // Semantic Search
                 const embeddingRes = await openai.embeddings.create({ model: 'text-embedding-3-small', input: message })
                 const query_embedding = embeddingRes.data[0].embedding
-                const { data: semData } = await supabase.rpc('search_vault_notes', { query_embedding, match_user_id: userId, match_count: 5 })
+                const { data: semData } = await supabase.rpc('match_vault_files', { query_embedding, match_user_id: userId, match_count: 5 })
 
                 // Text Search
-                const { data: txtData } = await supabase.rpc('search_vault_text', { search_query: message, match_user_id: userId, match_count: 5 })
+                const { data: txtData } = await supabase
+                    .from('vault_files')
+                    .select('id, name, content')
+                    .eq('user_id', userId)
+                    .or(`name.ilike.%${message}%,content.ilike.%${message}%`)
+                    .limit(5)
 
                 const resultMap = new Map()
-                semData?.forEach(r => resultMap.set(r.note_id, r))
-                txtData?.forEach(r => { if (!resultMap.has(r.note_id)) resultMap.set(r.note_id, r) })
+                semData?.forEach(r => resultMap.set(r.file_id, {
+                    note_id: r.file_id,
+                    title: r.name,
+                    content_preview: r.content_preview
+                }))
+                txtData?.forEach(r => {
+                    if (!resultMap.has(r.id)) {
+                        resultMap.set(r.id, {
+                            note_id: r.id,
+                            title: r.name,
+                            content_preview: r.content ? r.content.substring(0, 200) : ''
+                        })
+                    }
+                })
 
                 const topNotes = Array.from(resultMap.values()).slice(0, 5)
                 if (topNotes.length > 0) {
-                    vaultContext = 'Matched Vault Notes:\n' + topNotes.map(n => `Title: "${n.title}" (Folder: ${n.folder})\nContent snippet: ${n.content_preview}`).join('\n---\n')
+                    vaultContext = 'Matched Vault Notes:\n' + topNotes.map(n => `Title: "${n.title}"\nContent snippet: ${n.content_preview}`).join('\n---\n')
                 } else {
                     vaultContext = 'Searched vault but found no matching notes.'
                 }
@@ -263,6 +357,8 @@ Current context:
 - Total pending tasks: ${pendingTaskCount}
 - Currently reading: ${readingContext}
 - Health tracking: ${healthContext}
+- Custom Health Tables: 
+  - ${customTablesContext || 'No custom tables yet.'}
 - Connected Services Context: ${servicesString}
 - Entire Vault Profile: ${vaultSummary}
 - Relevant Vault Notes: ${vaultContext || 'No vault search triggered for this message.'}
@@ -275,14 +371,67 @@ Current context:
             { role: 'user', content: message },
         ]
 
+        const tools = [
+            {
+                type: 'function',
+                function: {
+                    name: 'schedule_reminder',
+                    description: 'Schedule a reminder for the user at a specific date and time based on their request. Use this whenever the user asks you to remind them of something.',
+                    parameters: {
+                        type: 'object',
+                        properties: {
+                            title: { type: 'string', description: 'A short, clear title for the reminder (e.g., "Doctor Appointment", "Call Mom")' },
+                            description: { type: 'string', description: 'Any extra details or context for the reminder.' },
+                            due_date: { type: 'string', description: 'The absolute ISO 8601 string for the date and time of the reminder (e.g., "2026-03-09T14:30:00.000Z"). Make sure to calculate this accurately based on the current time provided in the system prompt.' }
+                        },
+                        required: ['title', 'due_date']
+                    }
+                }
+            }
+        ]
+
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: chatMessages,
+            tools: tools,
+            tool_choice: 'auto',
             max_tokens: 1000,
             temperature: 0.7,
         })
 
-        const reply = completion.choices[0]?.message?.content || 'I couldn\'t generate a response.'
+        const responseMessage = completion.choices[0]?.message
+        let reply = responseMessage?.content || ''
+
+        // Check if the LLM decided to call a tool
+        if (responseMessage?.tool_calls) {
+            for (const toolCall of responseMessage.tool_calls) {
+                if (toolCall.function.name === 'schedule_reminder') {
+                    try {
+                        const args = JSON.parse(toolCall.function.arguments)
+
+                        // Save to Supabase
+                        await supabase.from('reminders').insert([{
+                            user_id: userId,
+                            title: args.title,
+                            description: args.description || null,
+                            due_date: args.due_date
+                        }])
+
+                        const formattedDate = new Date(args.due_date).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+                        // If there was no text content, formulate a default reply
+                        if (!reply.trim()) {
+                            reply = `Alright, I've set a reminder for "${args.title}" on ${formattedDate}.`
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse or save reminder tool call:', e)
+                        if (!reply.trim()) reply = "I tried to set a reminder, but something went wrong."
+                    }
+                }
+            }
+        }
+
+        if (!reply.trim()) reply = 'I couldn\'t generate a response.'
 
         // 8. Save both messages to secretary_messages
         try {

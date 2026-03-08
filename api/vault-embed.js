@@ -27,18 +27,12 @@ export default async function handler(req, res) {
         })
         const embedding = embeddingRes.data[0].embedding
 
-        // 3. Upsert into vault_embeddings
+        // 3. Update vault_files
         const { error } = await supabase
-            .from('vault_embeddings')
-            .upsert(
-                {
-                    note_id: noteId,
-                    user_id: userId,
-                    embedding: embedding,
-                    updated_at: new Date().toISOString()
-                },
-                { onConflict: 'note_id' }
-            )
+            .from('vault_files')
+            .update({ vector_embedding: embedding })
+            .eq('id', noteId)
+            .eq('user_id', userId)
 
         if (error) {
             console.error('Supabase upsert error:', error)

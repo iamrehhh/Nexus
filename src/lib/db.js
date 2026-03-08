@@ -525,8 +525,8 @@ export async function loadVaultFolders(userId) {
     if (fError) throw fError
 
     const { data: notes, error: nError } = await supabase
-        .from('vault_notes')
-        .select('folder, is_archived, is_pinned')
+        .from('vault_files')
+        .select('folder_id, is_favorite')
         .eq('user_id', userId)
 
     if (nError) throw nError
@@ -534,30 +534,27 @@ export async function loadVaultFolders(userId) {
     const counts = {}
     let allCount = 0
     let pinnedCount = 0
-    let archivedCount = 0
 
     notes.forEach(n => {
-        if (n.is_archived) {
-            archivedCount++
-        } else {
-            allCount++
-            counts[n.folder] = (counts[n.folder] || 0) + 1
-            if (n.is_pinned) pinnedCount++
+        allCount++
+        if (n.folder_id) {
+            counts[n.folder_id] = (counts[n.folder_id] || 0) + 1
         }
+        if (n.is_favorite) pinnedCount++
     })
 
     const updatedFolders = (folders || []).map(f => ({
         ...f,
-        note_count: counts[f.name] || 0
+        note_count: counts[f.id] || 0
     }))
 
-    return { folders: updatedFolders, allCount, pinnedCount, archivedCount, notes }
+    return { folders: updatedFolders, allCount, pinnedCount, archivedCount: 0, notes }
 }
 
 export async function createVaultFolder(userId, name, icon = 'folder', color = '#6366f1') {
     const { data, error } = await supabase
         .from('vault_folders')
-        .insert([{ user_id: userId, name, icon, color }])
+        .insert([{ user_id: userId, name }]) // Note: new schema only has name and parent_id
         .select()
         .single()
     if (error) throw error
@@ -577,17 +574,18 @@ export async function updateVaultFolder(folderId, updates) {
 
 export async function deleteVaultFolder(userId, folderId, folderName, deleteNotes) {
     if (!deleteNotes) {
+        // Move to Uncategorized or just clear folder_id
         await supabase
-            .from('vault_notes')
-            .update({ folder: 'General' })
+            .from('vault_files')
+            .update({ folder_id: null })
             .eq('user_id', userId)
-            .eq('folder', folderName)
+            .eq('folder_id', folderId)
     } else {
         await supabase
-            .from('vault_notes')
+            .from('vault_files')
             .delete()
             .eq('user_id', userId)
-            .eq('folder', folderName)
+            .eq('folder_id', folderId)
     }
     const { error } = await supabase.from('vault_folders').delete().eq('id', folderId)
     if (error) throw error
@@ -595,42 +593,97 @@ export async function deleteVaultFolder(userId, folderId, folderName, deleteNote
 
 export async function loadVaultNotes(userId, query = {}) {
     let q = supabase
-        .from('vault_notes')
-        .select('*')
+        .from('vault_files')
+        .select('*, vault_folders(name)')
         .eq('user_id', userId)
 
     if (query.folder && query.folder !== 'All Notes' && query.folder !== 'Pinned' && query.folder !== 'Archived') {
-        q = q.eq('folder', query.folder)
-    }
-
-    if (query.folder === 'Archived') {
-        q = q.eq('is_archived', true)
-    } else {
-        q = q.eq('is_archived', false)
+        q = q.eq('folder_id', query.folder) // Assuming Vault.jsx passes folder ID now
     }
 
     if (query.folder === 'Pinned') {
-        q = q.eq('is_pinned', true)
+        q = q.eq('is_favorite', true)
     }
 
-    q = q.order('is_pinned', { ascending: false }).order('updated_at', { ascending: false })
+    q = q.order('is_favorite', { ascending: false }).order('updated_at', { ascending: false })
 
     const { data, error } = await q
     if (error) throw error
-    return data
+
+    // Map data back for UI
+    return data.map(d => ({
+        ...d,
+        title: d.name,
+        folder: d.vault_folders?.name || 'Uncategorized',
+        is_pinned: d.is_favorite
+    }))
 }
 
 export async function saveVaultNote(userId, noteData) {
-    const { id, ...updates } = noteData
+    const { id, title, folder_id, is_pinned, content } = noteData
 
-    // Create preview
-    let preview = updates.content ? updates.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
-    updates.content_preview = preview.substring(0, 200)
+    let updates = {
+        name: title || 'Untitled',
+        content: content || '',
+        folder_id: folder_id || null,
+        is_favorite: is_pinned || false
+    }
 
     if (id) {
         const { data, error } = await supabase
-            .from('vault_notes')
+            .from('vault_files')
             .update({ ...updates, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select('*, vault_folders(name)')
+            .single()
+        if (error) throw error
+        return {
+            ...data,
+            title: data.name,
+            folder: data.vault_folders?.name || 'Uncategorized',
+            is_pinned: data.is_favorite
+        }
+    } else {
+        const { data, error } = await supabase
+            .from('vault_files')
+            .insert([{ ...updates, user_id: userId }])
+            .select('*, vault_folders(name)')
+            .single()
+        if (error) throw error
+        return {
+            ...data,
+            title: data.name,
+            folder: data.vault_folders?.name || 'Uncategorized',
+            is_pinned: data.is_favorite
+        }
+    }
+}
+
+export async function deleteVaultNote(noteId) {
+    const { error } = await supabase.from('vault_files').delete().eq('id', noteId)
+    if (error) throw error
+}
+
+// -----------------------------------------------------
+// HEALTH CUSTOM TABLES (Notion-style)
+// -----------------------------------------------------
+
+export async function loadHealthTables(userId) {
+    const { data, error } = await supabase
+        .from('health_tables')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+    if (error) throw error
+    return data || []
+}
+
+export async function saveHealthTable(userId, tableData) {
+    const { id, title, columns } = tableData
+    if (id) {
+        const { data, error } = await supabase
+            .from('health_tables')
+            .update({ title, columns, updated_at: new Date().toISOString() })
             .eq('id', id)
             .select()
             .single()
@@ -638,8 +691,8 @@ export async function saveVaultNote(userId, noteData) {
         return data
     } else {
         const { data, error } = await supabase
-            .from('vault_notes')
-            .insert([{ ...updates, user_id: userId }])
+            .from('health_tables')
+            .insert([{ user_id: userId, title, columns }])
             .select()
             .single()
         if (error) throw error
@@ -647,7 +700,107 @@ export async function saveVaultNote(userId, noteData) {
     }
 }
 
-export async function deleteVaultNote(noteId) {
-    const { error } = await supabase.from('vault_notes').delete().eq('id', noteId)
+export async function deleteHealthTable(tableId) {
+    const { error } = await supabase.from('health_tables').delete().eq('id', tableId)
+    if (error) throw error
+}
+
+export async function loadHealthTableRows(tableId) {
+    const { data, error } = await supabase
+        .from('health_table_rows')
+        .select('*')
+        .eq('table_id', tableId)
+        .order('created_at', { ascending: false })
+    if (error) throw error
+    return data || []
+}
+
+export async function saveHealthTableRow(userId, tableId, rowData) {
+    const { id, data: cellData } = rowData
+    if (id) {
+        const { data, error } = await supabase
+            .from('health_table_rows')
+            .update({ data: cellData, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select()
+            .single()
+        if (error) throw error
+        return data
+    } else {
+        const { data, error } = await supabase
+            .from('health_table_rows')
+            .insert([{ user_id: userId, table_id: tableId, data: cellData }])
+            .select()
+            .single()
+        if (error) throw error
+        return data
+    }
+}
+
+export async function deleteHealthTableRow(rowId) {
+    const { error } = await supabase.from('health_table_rows').delete().eq('id', rowId)
+    if (error) throw error
+}
+
+// -----------------------------------------------------
+// REMINDERS & NOTIFICATIONS
+// -----------------------------------------------------
+
+export async function loadReminders(userId) {
+    const { data, error } = await supabase
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .order('due_date', { ascending: true })
+    if (error) throw error
+    return data || []
+}
+
+export async function loadUpcomingReminders(userId) {
+    const now = new Date().toISOString()
+    const { data, error } = await supabase
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_completed', false)
+        .gte('due_date', now)
+        .order('due_date', { ascending: true })
+        .limit(5)
+    if (error) throw error
+    return data || []
+}
+
+export async function saveReminder(userId, reminderData) {
+    const { id, title, description, due_date } = reminderData
+    if (id) {
+        const { data, error } = await supabase
+            .from('reminders')
+            .update({ title, description, due_date, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select()
+            .single()
+        if (error) throw error
+        return data
+    } else {
+        const { data, error } = await supabase
+            .from('reminders')
+            .insert([{ user_id: userId, title, description, due_date }])
+            .select()
+            .single()
+        if (error) throw error
+        return data
+    }
+}
+
+export async function completeReminder(reminderId) {
+    const { error } = await supabase
+        .from('reminders')
+        .update({ is_completed: true, updated_at: new Date().toISOString() })
+        .eq('id', reminderId)
+    if (error) throw error
+}
+
+export async function deleteReminder(reminderId) {
+    const { error } = await supabase.from('reminders').delete().eq('id', reminderId)
     if (error) throw error
 }

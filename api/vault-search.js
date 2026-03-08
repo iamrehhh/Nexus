@@ -19,15 +19,25 @@ export default async function handler(req, res) {
         let textResults = []
         let semanticResults = []
 
-        // 1. Text Search
+        // 1. Text Search (Using ilike on name/content for vault_files)
         if (mode === 'text' || mode === 'both') {
-            const { data, error } = await supabase.rpc('search_vault_text', {
-                search_query: query,
-                match_user_id: userId,
-                match_count: 10
-            })
+            const { data, error } = await supabase
+                .from('vault_files')
+                .select('id, name, content, vault_folders(name)')
+                .eq('user_id', userId)
+                .or(`name.ilike.%${query}%,content.ilike.%${query}%`)
+                .limit(10)
+
             if (error) console.error('Text search error:', error)
-            else textResults = data || []
+            else {
+                textResults = (data || []).map(r => ({
+                    note_id: r.id,
+                    title: r.name,
+                    content_preview: r.content ? r.content.substring(0, 200) : '',
+                    folder: r.vault_folders?.name || 'Uncategorized',
+                    rank: 1 // Simple ranking for standard ILIKE
+                }))
+            }
         }
 
         // 2. Semantic Search
@@ -39,13 +49,21 @@ export default async function handler(req, res) {
                 })
                 const query_embedding = embeddingRes.data[0].embedding
 
-                const { data, error } = await supabase.rpc('search_vault_notes', {
+                const { data, error } = await supabase.rpc('match_vault_files', {
                     query_embedding,
                     match_user_id: userId,
                     match_count: 5
                 })
                 if (error) console.error('Semantic search error:', error)
-                else semanticResults = data || []
+                else {
+                    semanticResults = (data || []).map(r => ({
+                        note_id: r.file_id, // Ensure we map to expected keys
+                        title: r.name,
+                        content_preview: r.content_preview,
+                        folder: 'Uncategorized', // Optimization: could join folder name in RPC if needed
+                        similarity: r.similarity
+                    }))
+                }
             } catch (embedError) {
                 console.error('Semantic embedding error:', embedError)
             }

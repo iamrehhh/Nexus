@@ -149,7 +149,7 @@ export default async function handler(req, res) {
                 client_id: process.env.SPOTIFY_CLIENT_ID,
                 response_type: 'code',
                 redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL || process.env.VITE_APP_URL}/api/auth/spotify/callback`,
-                scope: 'user-read-currently-playing user-read-recently-played user-top-read user-read-playback-state',
+                scope: 'user-read-currently-playing user-read-recently-played user-top-read user-read-playback-state user-modify-playback-state',
                 state: userId
             })
             return res.redirect(`https://accounts.spotify.com/authorize?${params}`)

@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { getHealthMetricsConfig, saveHealthMetricsConfig, getHealthCheckins, saveHealthCheckin, deleteHealthCheckin, getLatestHealthInsight } from '../lib/db'
-import { Activity, LayoutDashboard, CheckSquare, Settings2, Plus, Moon, Zap, Droplets, Smile, Brain, Heart, Coffee, Dumbbell, Apple, Trash2, Edit2, ChevronUp, ChevronDown, Minus, Bot, Calendar as CalendarIcon } from 'lucide-react'
+import { getHealthMetricsConfig, saveHealthMetricsConfig, getHealthCheckins, saveHealthCheckin, deleteHealthCheckin, getLatestHealthInsight, loadHealthTables, saveHealthTable, deleteHealthTable, loadHealthTableRows, saveHealthTableRow, deleteHealthTableRow } from '../lib/db'
+import { Activity, LayoutDashboard, CheckSquare, Settings2, Plus, Moon, Zap, Droplets, Smile, Brain, Heart, Coffee, Dumbbell, Apple, Trash2, Edit2, ChevronUp, ChevronDown, Minus, Bot, Calendar as CalendarIcon, X, Table as TableIcon } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
@@ -52,6 +52,15 @@ export default function Health() {
     const [metricForm, setMetricForm] = useState({ label: '', description: '', type: 'scale', min: 1, max: 10, unit: '', icon: 'activity', color: '#6366f1' })
     const [schedule, setSchedule] = useState('weekly')
 
+    // Tables State
+    const [tables, setTables] = useState([])
+    const [activeTableId, setActiveTableId] = useState(null)
+    const [tableRows, setTableRows] = useState([])
+    const [showTableModal, setShowTableModal] = useState(false)
+    const [tableForm, setTableForm] = useState({ title: '', columns: [] })
+    const [editingCell, setEditingCell] = useState(null)
+    const [editValue, setEditValue] = useState('')
+
     useEffect(() => {
         if (user) loadData()
     }, [user])
@@ -93,11 +102,14 @@ export default function Health() {
             setCustomMetrics(currConfig.metrics)
             setSchedule(currConfig.checkin_schedule)
 
-            const [pastCheckins, latestInsight] = await Promise.all([
+            const [pastCheckins, latestInsight, userTables] = await Promise.all([
                 getHealthCheckins(user.uid, 12),
-                getLatestHealthInsight(user.uid)
+                getLatestHealthInsight(user.uid),
+                loadHealthTables(user.uid)
             ])
             setCheckins(pastCheckins)
+            setTables(userTables)
+            if (latestInsight) setInsight(latestInsight)
             setInsight(latestInsight)
 
         } catch (err) {
@@ -225,6 +237,99 @@ export default function Health() {
         setCustomMetrics(newMetrics)
     }
 
+    // --- TABLES ACTIONS ---
+    const handleCreateTable = async () => {
+        if (!tableForm.title.trim()) return toast.error('Title is required')
+        try {
+            const table = await saveHealthTable(user.uid, tableForm)
+            setTables(prev => [table, ...prev])
+            setShowTableModal(false)
+            setTableForm({ title: '', columns: [] })
+            toast.success('Table created')
+            setActiveTableId(table.id)
+        } catch (err) {
+            toast.error('Failed to create table')
+        }
+    }
+
+    const handleDeleteTable = async (id) => {
+        if (!window.confirm('Delete this table and all its data?')) return
+        try {
+            await deleteHealthTable(id)
+            setTables(prev => prev.filter(t => t.id !== id))
+            if (activeTableId === id) setActiveTableId(null)
+            toast.success('Table deleted')
+        } catch (err) {
+            toast.error('Failed to delete table')
+        }
+    }
+
+    const addColumnToForm = () => {
+        setTableForm(prev => ({
+            ...prev,
+            columns: [...prev.columns, { id: Date.now().toString(), name: 'New Column', type: 'text' }]
+        }))
+    }
+
+    const updateColumnInForm = (index, field, value) => {
+        const newCols = [...tableForm.columns]
+        newCols[index][field] = value
+        setTableForm(prev => ({ ...prev, columns: newCols }))
+    }
+
+    const removeColumnFromForm = (index) => {
+        setTableForm(prev => ({
+            ...prev,
+            columns: prev.columns.filter((_, i) => i !== index)
+        }))
+    }
+
+    // Load rows when active table changes
+    useEffect(() => {
+        if (!activeTableId) return
+        loadHealthTableRows(activeTableId).then(setTableRows).catch(console.error)
+    }, [activeTableId])
+
+    const handleAddRow = async () => {
+        if (!activeTableId) return
+        try {
+            // New rows go at top
+            const newRow = await saveHealthTableRow(user.uid, activeTableId, { data: {} })
+            setTableRows(prev => [newRow, ...prev])
+        } catch (err) {
+            toast.error('Failed to add row')
+        }
+    }
+
+    const handleDeleteRow = async (rowId) => {
+        if (!window.confirm('Delete this row?')) return
+        try {
+            await deleteHealthTableRow(rowId)
+            setTableRows(prev => prev.filter(r => r.id !== rowId))
+        } catch (err) {
+            toast.error('Failed to delete row')
+        }
+    }
+
+    const handleCellSave = async (rowId, colId, value) => {
+        const row = tableRows.find(r => r.id === rowId)
+        if (!row) return
+
+        const newData = { ...row.data, [colId]: value }
+
+        // Optimistic update
+        setTableRows(prev => prev.map(r => r.id === rowId ? { ...r, data: newData } : r))
+        setEditingCell(null)
+
+        try {
+            await saveHealthTableRow(user.uid, activeTableId, { id: rowId, data: newData })
+        } catch (err) {
+            toast.error('Failed to save cell')
+            // Revert optimism on load failure
+            loadHealthTableRows(activeTableId).then(setTableRows)
+        }
+    }
+
     // --- RENDER HELPERS ---
     const chartData = useMemo(() => {
         return [...checkins].reverse().map(c => {
@@ -258,6 +363,9 @@ export default function Health() {
                     </button>
                     <button onClick={() => setActiveTab('configure')} style={{ ...s.tabBtn, ...(activeTab === 'configure' ? s.activeTab : {}) }}>
                         <Settings2 size={14} /> Configure
+                    </button>
+                    <button onClick={() => setActiveTab('tables')} style={{ ...s.tabBtn, ...(activeTab === 'tables' ? s.activeTab : {}) }}>
+                        <TableIcon size={14} /> Tables
                     </button>
                 </div>
             </div>
@@ -311,6 +419,37 @@ export default function Health() {
                                         </div>
                                     )
                                 })}
+                            </div>
+
+                            {/* History List for Edits & Delets */}
+                            <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16, marginTop: 32 }}>Recent Check-ins</h3>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
+                                {checkins.slice(0, 5).map(c => (
+                                    <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', padding: '16px 20px', borderRadius: 12, border: '1px solid var(--border)' }}>
+                                        <div>
+                                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+                                                {new Date(c.checkin_date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                            </div>
+                                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                                                {Object.keys(c.data).length} metrics logged {c.mood_summary && `• Mood: ${c.mood_summary}`}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button onClick={() => { setCheckinDate(c.checkin_date); setActiveTab('checkin'); }} style={{ ...s.secondaryBtn, padding: '6px 12px', fontSize: 12 }}>
+                                                Edit
+                                            </button>
+                                            <button onClick={async () => {
+                                                if (window.confirm('Delete this check-in? This cannot be undone.')) {
+                                                    await deleteHealthCheckin(c.id);
+                                                    setCheckins(prev => prev.filter(x => x.id !== c.id));
+                                                    toast.success('Check-in deleted');
+                                                }
+                                            }} style={{ ...s.secondaryBtn, color: 'var(--accent-red)', padding: '6px 12px', fontSize: 12 }}>
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
 
                             {/* AI Insights */}
@@ -393,14 +532,32 @@ export default function Health() {
                 <div style={{ ...s.fadeContent, maxWidth: 640, margin: '0 auto' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
                         <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Weekly Check-in</h2>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                            <CalendarIcon size={14} style={{ color: 'var(--text-dim)' }} />
-                            <input
-                                type="date"
-                                value={checkinDate}
-                                onChange={e => setCheckinDate(e.target.value)}
-                                style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 14, outline: 'none' }}
-                            />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <button onClick={() => {
+                                if (window.confirm("Clear all values and start over?")) {
+                                    const defaults = {}
+                                    config.metrics.forEach(m => {
+                                        if (m.type === 'scale') defaults[m.id] = Math.max(m.min, Math.min(5, m.max))
+                                        else if (m.type === 'number') defaults[m.id] = m.min || 0
+                                        else if (m.type === 'boolean') defaults[m.id] = false
+                                        else defaults[m.id] = ''
+                                    })
+                                    setFormData(defaults)
+                                    setNotes('')
+                                    setMoodSummary('')
+                                }
+                            }} style={{ ...s.secondaryBtn, padding: '6px 12px', fontSize: 12 }}>Reset all</button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                                <CalendarIcon size={14} style={{ color: 'var(--text-dim)' }} />
+                                {/* Lock date field if editing existing checkin */}
+                                <input
+                                    type="date"
+                                    value={checkinDate}
+                                    onChange={e => setCheckinDate(e.target.value)}
+                                    disabled={checkins.some(c => c.checkin_date === checkinDate)}
+                                    style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 14, outline: 'none', opacity: checkins.some(c => c.checkin_date === checkinDate) ? 0.7 : 1, cursor: checkins.some(c => c.checkin_date === checkinDate) ? 'not-allowed' : 'auto' }}
+                                />
+                            </div>
                         </div>
                     </div>
 
@@ -419,9 +576,21 @@ export default function Health() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
                             {config.metrics.map(m => (
                                 <div key={m.id} style={s.formGroup}>
-                                    <div style={{ marginBottom: 12 }}>
-                                        <label style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{m.label}</label>
-                                        {m.description && <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{m.description}</p>}
+                                    <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <div>
+                                            <label style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{m.label}</label>
+                                            {m.description && <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{m.description}</p>}
+                                        </div>
+                                        <button onClick={() => {
+                                            let def;
+                                            if (m.type === 'scale') def = Math.max(m.min, Math.min(5, m.max))
+                                            else if (m.type === 'number') def = m.min || 0
+                                            else if (m.type === 'boolean') def = false
+                                            else def = ''
+                                            handleChangeForm(m.id, def)
+                                        }} style={s.iconBtn} aria-label="Reset metric" title="Reset metric">
+                                            <X size={16} />
+                                        </button>
                                     </div>
 
                                     {m.type === 'scale' && (
@@ -613,6 +782,127 @@ export default function Health() {
                 </div>
             )}
 
+            {/* TAB: TABLES */}
+            {activeTab === 'tables' && (
+                <div style={s.fadeContent}>
+                    {!activeTableId ? (
+                        <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                                <div>
+                                    <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Custom Tables</h2>
+                                    <p style={{ fontSize: 14, color: 'var(--text-dim)' }}>Create Notion-style tables to track anything else.</p>
+                                </div>
+                                <button onClick={() => setShowTableModal(true)} style={s.primaryBtnSmall}><Plus size={14} /> New Table</button>
+                            </div>
+
+                            {tables.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '60px 20px', background: 'var(--surface)', borderRadius: 12, border: '1px dashed var(--border)' }}>
+                                    <TableIcon size={32} style={{ color: 'var(--text-faint)', margin: '0 auto 12px' }} />
+                                    <h3 style={{ fontSize: 15, fontWeight: 500, color: 'var(--text)', marginBottom: 8 }}>No tables yet</h3>
+                                    <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>Create your first custom table to start tracking.</p>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+                                    {tables.map(t => (
+                                        <div key={t.id} onClick={() => setActiveTableId(t.id)} style={{ padding: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, cursor: 'pointer', transition: 'all 0.2s', ...s.hoverCard }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                                                <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <TableIcon size={16} style={{ color: 'var(--accent)' }} />
+                                                </div>
+                                                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{t.title}</h3>
+                                            </div>
+                                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.columns.length} columns</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div>
+                            {/* Table Editor */}
+                            {(() => {
+                                const table = tables.find(t => t.id === activeTableId)
+                                if (!table) return null
+                                return (
+                                    <>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                <button onClick={() => setActiveTableId(null)} style={s.iconBtn}><ChevronUp size={20} style={{ transform: 'rotate(-90deg)' }} /></button>
+                                                <h2 style={{ fontSize: 20, fontWeight: 600, color: 'var(--text)' }}>{table.title}</h2>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <button onClick={handleAddRow} style={s.smallBtn}><Plus size={14} /> Add Row</button>
+                                                <button onClick={() => handleDeleteTable(table.id)} style={{ ...s.smallBtn, color: 'var(--accent-red)' }}><Trash2 size={14} /></button>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ overflowX: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+                                                <thead>
+                                                    <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
+                                                        {table.columns.map(c => (
+                                                            <th key={c.id} style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                                                                {c.name}
+                                                            </th>
+                                                        ))}
+                                                        <th style={{ padding: '12px 16px', width: 40 }}></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {tableRows.map(row => (
+                                                        <tr key={row.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                            {table.columns.map(c => {
+                                                                const isEditing = editingCell?.rowId === row.id && editingCell?.colId === c.id
+                                                                const value = row.data[c.id] || ''
+                                                                return (
+                                                                    <td
+                                                                        key={c.id}
+                                                                        onClick={() => {
+                                                                            if (!isEditing) {
+                                                                                setEditingCell({ rowId: row.id, colId: c.id })
+                                                                                setEditValue(value)
+                                                                            }
+                                                                        }}
+                                                                        style={{ padding: '12px 16px', color: 'var(--text)', borderRight: '1px solid var(--border)', cursor: 'text', minWidth: 120 }}
+                                                                    >
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                autoFocus
+                                                                                value={editValue}
+                                                                                onChange={e => setEditValue(e.target.value)}
+                                                                                onBlur={() => handleCellSave(row.id, c.id, editValue)}
+                                                                                onKeyDown={e => e.key === 'Enter' && handleCellSave(row.id, c.id, editValue)}
+                                                                                style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: 'inherit', fontSize: 'inherit', padding: 0 }}
+                                                                            />
+                                                                        ) : (
+                                                                            value || <span style={{ color: 'var(--text-faint)' }}>Empty</span>
+                                                                        )}
+                                                                    </td>
+                                                                )
+                                                            })}
+                                                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                                                <button onClick={() => handleDeleteRow(row.id)} style={{ ...s.iconBtn, color: 'var(--text-faint)', padding: 4 }}><X size={14} /></button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                    {tableRows.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={table.columns.length + 1} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-dim)' }}>
+                                                                No rows yet. Click "Add Row" to start.
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
+                                )
+                            })()}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* ADD/EDIT METRIC MODAL */}
             {showMetricModal && (
                 <div style={s.modalOverlay}>
@@ -685,6 +975,46 @@ export default function Health() {
                         <div style={{ display: 'flex', gap: 12, marginTop: 32 }}>
                             <button onClick={submitMetricForm} style={{ ...s.primaryBtn, flex: 1 }}>Save Metric</button>
                             <button onClick={() => setShowMetricModal(false)} style={{ ...s.secondaryBtn, flex: 1 }}>Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ADD TABLE MODAL */}
+            {showTableModal && (
+                <div style={s.modalOverlay}>
+                    <div style={s.modal}>
+                        <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', marginBottom: 20 }}>New Custom Table</h3>
+                        <div style={s.formGroup}>
+                            <label style={s.label}>Table Title</label>
+                            <input autoFocus style={s.input} value={tableForm.title} onChange={e => setTableForm({ ...tableForm, title: e.target.value })} placeholder="e.g. Budget Tracking" />
+                        </div>
+                        <div style={{ marginTop: 16 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <label style={s.label}>Columns</label>
+                                <button onClick={addColumnToForm} style={{ ...s.smallBtn, padding: '4px 8px' }}><Plus size={14} /> Add</button>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {tableForm.columns.map((c, i) => (
+                                    <div key={c.id} style={{ display: 'flex', gap: 8 }}>
+                                        <input style={{ ...s.input, flex: 1 }} value={c.name} onChange={e => updateColumnInForm(i, 'name', e.target.value)} placeholder="Column Name" />
+                                        <select style={{ ...s.input, width: 100 }} value={c.type} onChange={e => updateColumnInForm(i, 'type', e.target.value)}>
+                                            <option value="text">Text</option>
+                                            <option value="number">Number</option>
+                                            <option value="date">Date</option>
+                                            <option value="boolean">Checkbox</option>
+                                        </select>
+                                        <button onClick={() => removeColumnFromForm(i)} style={{ ...s.iconBtn, color: 'var(--accent-red)' }}><Trash2 size={16} /></button>
+                                    </div>
+                                ))}
+                                {tableForm.columns.length === 0 && (
+                                    <p style={{ fontSize: 13, color: 'var(--text-faint)' }}>Add columns to track your data.</p>
+                                )}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 12, marginTop: 32 }}>
+                            <button onClick={handleCreateTable} disabled={tableForm.columns.length === 0 || !tableForm.title} style={{ ...s.primaryBtn, flex: 1, opacity: (tableForm.columns.length === 0 || !tableForm.title) ? 0.5 : 1 }}>Create Table</button>
+                            <button onClick={() => setShowTableModal(false)} style={{ ...s.secondaryBtn, flex: 1 }}>Cancel</button>
                         </div>
                     </div>
                 </div>

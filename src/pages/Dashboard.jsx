@@ -1,20 +1,32 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { loadTasks, addTask, completeTask, uncompleteTask, getTodayTaskCount, getPendingTaskCount, getMemoryCount, loadVaultNotes } from '../lib/db'
-import { CheckSquare, Clock, Brain, Calendar, Plus, Send, BookOpen, Activity, Link2, Github, Mail, Music, Calendar as CalendarIcon, Lock, Pin } from 'lucide-react'
+import { loadTasks, addTask, completeTask, getTodayTaskCount, getPendingTaskCount, getMemoryCount, loadUpcomingReminders, getLastReadBook, getHealthCheckins, getHealthMetricsConfig } from '../lib/db'
+import { CheckSquare, Clock, Brain, Calendar as CalendarIcon, Plus, Send, BookOpen, Activity } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Dashboard() {
     const { user, userData } = useAuth()
     const navigate = useNavigate()
+
+    // Core State
     const [todayTasks, setTodayTasks] = useState([])
-    const [vaultNotes, setVaultNotes] = useState([])
+    const [upcomingReminders, setUpcomingReminders] = useState([])
     const [stats, setStats] = useState({ todayCount: 0, pendingCount: 0, memoryCount: 0, daysActive: 0 })
+
+    // UI State
     const [showAddTask, setShowAddTask] = useState(false)
     const [newTask, setNewTask] = useState({ title: '', dueDate: '', priority: 'medium' })
     const [secretaryInput, setSecretaryInput] = useState('')
     const [loading, setLoading] = useState(true)
+    const [windowWidth, setWindowWidth] = useState(window.innerWidth)
+
+    useEffect(() => {
+        const handleResize = () => setWindowWidth(window.innerWidth)
+        window.addEventListener('resize', handleResize)
+        return () => window.removeEventListener('resize', handleResize)
+    }, [])
+    const isMobile = windowWidth < 768
 
     const firstName = user?.displayName?.split(' ')[0] || 'User'
 
@@ -37,16 +49,7 @@ export default function Dashboard() {
 
     const loadDashboardData = async () => {
         try {
-            const { getLastReadBook, getHealthCheckins, getHealthMetricsConfig } = await import('../lib/db')
-
-            const fetchService = async (srv) => {
-                try {
-                    const res = await fetch(`/api/services/${srv}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.uid }) })
-                    return await res.json()
-                } catch (e) { return { connected: false } }
-            }
-
-            const [tasks, todayCount, pendingCount, memoryCount, lastBook, healthCheckins, healthConfig, github, spotify, gmail, calendar, vaultNotesData] = await Promise.all([
+            const [tasks, todayCount, pendingCount, memoryCount, lastBook, healthCheckins, healthConfig, reminders] = await Promise.all([
                 loadTasks(user.uid, { pendingOnly: true }),
                 getTodayTaskCount(user.uid),
                 getPendingTaskCount(user.uid),
@@ -54,15 +57,10 @@ export default function Dashboard() {
                 getLastReadBook(user.uid),
                 getHealthCheckins(user.uid, 1).catch(() => []),
                 getHealthMetricsConfig(user.uid).catch(() => null),
-                fetchService('github'),
-                fetchService('spotify'),
-                fetchService('gmail'),
-                fetchService('calendar'),
-                loadVaultNotes(user.uid, { folder: 'All Notes' }).catch(() => [])
+                loadUpcomingReminders(user.uid).catch(() => [])
             ])
 
             const today = new Date()
-            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
             const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
 
             const todayFiltered = tasks.filter(t => {
@@ -87,10 +85,9 @@ export default function Dashboard() {
             }
 
             setTodayTasks(todayFiltered)
-            setVaultNotes(vaultNotesData || [])
+            setUpcomingReminders(reminders || [])
             setStats({
-                todayCount, pendingCount, memoryCount, daysActive, lastBook, healthStats,
-                services: { github, spotify, gmail, calendar }
+                todayCount, pendingCount, memoryCount, daysActive, lastBook, healthStats
             })
         } catch (err) {
             console.error('Failed to load dashboard data:', err)
@@ -140,7 +137,6 @@ export default function Dashboard() {
     const quickActions = [
         'Plan my week',
         'What should I focus on?',
-        'Add a reminder',
         'Give me ideas',
     ]
 
@@ -148,519 +144,230 @@ export default function Dashboard() {
 
     if (loading) {
         return (
-            <div style={styles.page}>
-                <div style={styles.header}>
-                    <div style={{ height: 32, width: 200, background: 'var(--border)', borderRadius: 8, marginBottom: 8, animation: 'pulse 1.5s infinite ease-in-out' }} />
-                    <div style={{ height: 20, width: 150, background: 'var(--border)', borderRadius: 8, animation: 'pulse 1.5s infinite ease-in-out' }} />
-                </div>
-                <div style={styles.statsGrid}>
-                    {[1, 2, 3, 4].map(i => (
-                        <div key={i} style={{ ...styles.statCard, height: 88, background: 'var(--border)', animation: 'pulse 1.5s infinite ease-in-out' }} />
-                    ))}
-                </div>
-                <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 32 }}>
-                    <div style={{ flex: '1 1 400px', height: 200, background: 'var(--border)', borderRadius: 12, animation: 'pulse 1.5s infinite ease-in-out' }} />
-                    <div style={{ flex: '0 0 320px', height: 200, background: 'var(--border)', borderRadius: 12, animation: 'pulse 1.5s infinite ease-in-out' }} />
-                </div>
-                <div style={styles.previewGrid}>
-                    {[1, 2, 3, 4, 5, 6].map(i => (
-                        <div key={i} style={{ ...styles.previewCard, height: 120, background: 'var(--border)', animation: 'pulse 1.5s infinite ease-in-out' }} />
-                    ))}
+            <div style={{ padding: isMobile ? '24px 20px' : '48px 64px', maxWidth: 1200, margin: '0 auto' }}>
+                <div style={{ height: 36, width: 250, background: 'var(--border)', borderRadius: 8, marginBottom: 12, animation: 'pulse 1.5s infinite ease-in-out' }} />
+                <div style={{ height: 20, width: 180, background: 'var(--border)', borderRadius: 8, marginBottom: 48, animation: 'pulse 1.5s infinite ease-in-out' }} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 48 }}>
+                    {[1, 2, 3, 4].map(i => <div key={i} style={{ height: 80, background: 'var(--border)', borderRadius: 16, animation: 'pulse 1.5s infinite ease-in-out' }} />)}
                 </div>
             </div>
         )
     }
 
+    const daysSinceHealth = stats.healthStats?.lastDate ? Math.floor((Date.now() - new Date(stats.healthStats.lastDate).getTime()) / (1000 * 3600 * 24)) : null
+    const bookProgress = stats.lastBook ? Math.round((stats.lastBook.progress || 0) * 100) : 0
+
     return (
-        <div style={styles.page}>
-            {/* Header */}
-            <div style={styles.header}>
-                <h1 style={styles.greeting}>{getGreeting()}, {firstName}</h1>
-                <p style={styles.date}>{getFormattedDate()}</p>
+        <div style={{ padding: isMobile ? '24px 20px' : '48px 64px', maxWidth: 1200, margin: '0 auto', animation: 'fadeUp 0.3s ease' }}>
+
+            {/* HERO SECTION */}
+            <div style={{ marginBottom: 48 }}>
+                <h1 style={{ fontSize: isMobile ? 32 : 40, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)', marginBottom: 8 }}>{getGreeting()}, {firstName}</h1>
+                <p style={{ fontSize: 16, color: 'var(--text-faint)', marginBottom: 24 }}>{getFormattedDate()}</p>
+                <div style={{ background: 'var(--surface)', padding: '16px 24px', borderRadius: 16, border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', gap: 16, boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
+                    <div style={{ width: 8, height: 8, background: 'var(--accent)', borderRadius: '50%', boxShadow: '0 0 12px var(--accent)' }} />
+                    <span style={{ fontSize: 15, color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: 640 }}>
+                        We have <strong style={{ color: 'var(--text)', fontWeight: 600 }}>{stats.todayCount} tasks</strong> for today.
+                        {daysSinceHealth !== null && <span> It's been <strong style={{ color: 'var(--text)', fontWeight: 600 }}>{daysSinceHealth} days</strong> since your last check-in.</span>}
+                        {stats.lastBook && <span> You're currently <strong style={{ color: 'var(--text)', fontWeight: 600 }}>{bookProgress}%</strong> through '{stats.lastBook.title}'.</span>}
+                    </span>
+                </div>
             </div>
 
-            {/* Stats Row */}
-            <div style={styles.statsGrid}>
+            {/* STATS ROW */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 48 }}>
                 {[
-                    { label: 'Tasks Today', value: stats.todayCount, icon: CheckSquare, color: 'var(--accent-blue)' },
-                    { label: 'Tasks Pending', value: stats.pendingCount, icon: Clock, color: 'var(--accent-amber)' },
-                    { label: 'Memory Saved', value: stats.memoryCount, icon: Brain, color: 'var(--accent-green)' },
-                    { label: 'Days Active', value: stats.daysActive, icon: Calendar, color: 'var(--accent)' },
+                    { label: "Tasks Today", value: stats.todayCount, icon: CheckSquare },
+                    { label: 'Pending', value: stats.pendingCount, icon: Clock },
+                    { label: 'Memory Saved', value: stats.memoryCount, icon: Brain },
+                    { label: 'Days Active', value: stats.daysActive, icon: CalendarIcon },
                 ].map((stat, i) => (
-                    <div key={i} style={styles.statCard}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                            <span style={{ fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>{stat.label}</span>
-                            <stat.icon size={16} style={{ color: stat.color }} />
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px 24px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 16 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <stat.icon size={20} style={{ color: 'var(--text-dim)' }} />
                         </div>
-                        <span className="mono" style={{ fontSize: 28, fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.02em' }}>{stat.value}</span>
+                        <div>
+                            <div className="mono" style={{ fontSize: 26, fontWeight: 600, color: 'var(--text)', lineHeight: 1 }}>{stat.value}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
+                        </div>
                     </div>
                 ))}
             </div>
 
-            <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 32 }}>
-                {/* Today's Tasks */}
-                <div style={{ flex: '1 1 400px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                        <h2 style={styles.sectionTitle}>Today's Tasks</h2>
-                    </div>
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 48, alignItems: 'flex-start' }}>
 
-                    {todayTasks.length === 0 && !showAddTask ? (
-                        <p style={{ fontSize: 14, color: 'var(--text-dim)', padding: '20px 0' }}>
-                            No tasks for today. Ask your secretary to help you plan.
-                        </p>
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {todayTasks.map(task => (
-                                <div key={task.id} style={styles.taskItem}>
-                                    <button onClick={() => handleCompleteTask(task.id)} style={styles.checkbox}>
-                                        <CheckSquare size={16} style={{ color: 'var(--text-faint)' }} />
-                                    </button>
-                                    <span style={{ flex: 1, fontSize: 14, color: 'var(--text)' }}>{task.title}</span>
-                                    <span style={{
-                                        fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4,
-                                        color: priorityColors[task.priority] || priorityColors.medium,
-                                        background: `${priorityColors[task.priority] || priorityColors.medium}15`,
-                                        textTransform: 'uppercase', letterSpacing: '0.05em',
-                                    }}>
-                                        {task.priority}
-                                    </span>
-                                </div>
+                {/* LEFT COLUMN */}
+                <div style={{ flex: '8 1 0%', minWidth: 0, width: '100%' }}>
+
+                    {/* Quick Secretary */}
+                    <div style={{ marginBottom: 48 }}>
+                        <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 16 }}>Secretary</h2>
+                        <div style={{ display: 'flex', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', padding: '12px 16px', borderRadius: 16, boxShadow: '0 8px 24px rgba(0,0,0,0.03)', alignItems: 'center', transition: 'box-shadow 0.2s ease' }}>
+                            <div style={{ padding: 8, background: 'var(--accent)15', borderRadius: 10, color: 'var(--accent)' }}>
+                                <Brain size={20} />
+                            </div>
+                            <input
+                                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 15, color: 'var(--text)' }}
+                                placeholder="Ask your secretary anything..."
+                                value={secretaryInput}
+                                onChange={e => setSecretaryInput(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleSecretarySubmit()}
+                            />
+                            <button onClick={() => handleSecretarySubmit()} disabled={!secretaryInput.trim()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: secretaryInput.trim() ? 'var(--accent)' : 'var(--border)', color: secretaryInput.trim() ? '#fff' : 'var(--text-dim)', border: 'none', width: 40, height: 40, borderRadius: 10, cursor: secretaryInput.trim() ? 'pointer' : 'default', transition: 'all 0.2s ease' }}>
+                                <Send size={18} style={{ marginLeft: -2 }} />
+                            </button>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+                            {quickActions.map(a => (
+                                <button key={a} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 20, fontSize: 13, color: 'var(--text-dim)', cursor: 'pointer', transition: 'all 0.15s ease' }} onClick={() => handleSecretarySubmit(a)}>
+                                    {a}
+                                </button>
                             ))}
                         </div>
-                    )}
+                    </div>
 
-                    {showAddTask ? (
-                        <div style={styles.addTaskForm}>
-                            <input
-                                style={styles.input}
-                                placeholder="Task title..."
-                                value={newTask.title}
-                                onChange={e => setNewTask(p => ({ ...p, title: e.target.value }))}
-                                onKeyDown={e => e.key === 'Enter' && handleAddTask()}
-                                autoFocus
-                            />
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {/* Today's Tasks */}
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                            <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Today's Priorities</h2>
+                            <button onClick={() => setShowAddTask(!showAddTask)} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Plus size={14} /> Add
+                            </button>
+                        </div>
+
+                        {showAddTask && (
+                            <div style={{ display: 'flex', gap: 12, marginBottom: 24, padding: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16 }}>
                                 <input
-                                    type="date"
-                                    style={{ ...styles.input, flex: 1 }}
-                                    value={newTask.dueDate}
-                                    onChange={e => setNewTask(p => ({ ...p, dueDate: e.target.value }))}
+                                    style={{ flex: 1, padding: '10px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, color: 'var(--text)', outline: 'none' }}
+                                    placeholder="Task title..."
+                                    value={newTask.title}
+                                    onChange={e => setNewTask(p => ({ ...p, title: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleAddTask()}
+                                    autoFocus
                                 />
-                                <select
-                                    style={{ ...styles.input, flex: 1 }}
-                                    value={newTask.priority}
-                                    onChange={e => setNewTask(p => ({ ...p, priority: e.target.value }))}
-                                >
-                                    <option value="low">Low</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="high">High</option>
-                                </select>
-                                <button onClick={handleAddTask} style={styles.saveBtn}>Save</button>
-                                <button onClick={() => setShowAddTask(false)} style={styles.cancelBtn}>Cancel</button>
+                                <input type="date" style={{ padding: '10px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, color: 'var(--text)', outline: 'none' }} value={newTask.dueDate} onChange={e => setNewTask(p => ({ ...p, dueDate: e.target.value }))} />
+                                <button onClick={handleAddTask} style={{ padding: '0 20px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Save</button>
                             </div>
-                        </div>
-                    ) : (
-                        <button onClick={() => setShowAddTask(true)} style={styles.addTaskBtn}>
-                            <Plus size={16} />
-                            <span>Add task</span>
-                        </button>
-                    )}
+                        )}
+
+                        {todayTasks.length === 0 && !showAddTask ? (
+                            <div style={{ padding: '32px 0', borderTop: '1px solid var(--border)40' }}>
+                                <p style={{ fontSize: 14, color: 'var(--text-faint)' }}>You're all caught up for today.</p>
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                {todayTasks.map((task, i) => (
+                                    <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px 0', borderTop: i === 0 ? '1px solid var(--border)' : '1px solid var(--border)40' }}>
+                                        <button onClick={() => handleCompleteTask(task.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'var(--text-dim)', opacity: 0.6, transition: 'opacity 0.15s ease' }} className="hover-opacity-100">
+                                            <CheckSquare size={20} />
+                                        </button>
+                                        <span style={{ flex: 1, fontSize: 15, color: 'var(--text)', fontWeight: 500 }}>{task.title}</span>
+                                        <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 6, color: priorityColors[task.priority] || priorityColors.medium, background: `${priorityColors[task.priority] || priorityColors.medium}15`, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                            {task.priority}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                {/* Reading Widget */}
-                <div style={{ flex: '0 0 320px' }}>
-                    <h2 style={{ ...styles.sectionTitle, marginBottom: 16 }}>Currently Reading</h2>
-                    {stats.lastBook ? (
-                        <div style={{ ...styles.previewCard, padding: 0, overflow: 'hidden' }} onClick={() => navigate(`/reading/${stats.lastBook.id}`)}>
-                            <div style={{ height: 120, background: stats.lastBook.cover_color || '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-                                <span style={{ color: '#fff', fontWeight: 600, fontSize: 16, textAlign: 'center', textShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>{stats.lastBook.title}</span>
-                            </div>
-                            <div style={{ padding: '16px 20px' }}>
-                                <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 12 }}>{stats.lastBook.author || 'Unknown Author'}</p>
-                                <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
-                                    <div style={{ height: '100%', background: 'var(--accent)', width: `${Math.round((stats.lastBook.progress || 0) * 100)}%` }} />
+                {/* RIGHT COLUMN */}
+                <div style={{ flex: '5 1 0%', minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 48 }}>
+
+                    {/* Upcoming Reminders */}
+                    <div>
+                        <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 16 }}>Upcoming</h2>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            {upcomingReminders.length === 0 ? (
+                                <p style={{ fontSize: 14, color: 'var(--text-faint)' }}>Nothing scheduled.</p>
+                            ) : (
+                                upcomingReminders.map(r => (
+                                    <div key={r.id} style={{ display: 'flex', gap: 16, padding: '20px', background: 'var(--surface)', border: '1px solid var(--border)40', borderRadius: 16, boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
+                                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--accent-amber)', marginTop: 4, boxShadow: '0 0 8px var(--accent-amber)40' }} />
+                                        <div>
+                                            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6, lineHeight: 1.3 }}>{r.title}</div>
+                                            {r.description && <div style={{ fontSize: 14, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.4 }}>{r.description}</div>}
+                                            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{new Date(r.due_date).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Currently Reading */}
+                    <div>
+                        <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 16 }}>Reading</h2>
+                        {stats.lastBook ? (
+                            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)40', borderRadius: 16, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.03)', cursor: 'pointer', transition: 'transform 0.2s ease, box-shadow 0.2s ease' }} onClick={() => navigate(`/reading/${stats.lastBook.id}`)}>
+                                <div style={{ height: 140, background: stats.lastBook.cover_color || '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+                                    <span style={{ color: '#fff', fontWeight: 700, fontSize: 20, textAlign: 'center', letterSpacing: '-0.01em', textShadow: '0 2px 12px rgba(0,0,0,0.3)', lineHeight: 1.3 }}>{stats.lastBook.title}</span>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Page {stats.lastBook.current_page || 1}</span>
-                                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>Continue →</span>
+                                <div style={{ padding: 24 }}>
+                                    <p style={{ fontSize: 14, color: 'var(--text-dim)', marginBottom: 20 }}>{stats.lastBook.author || 'Unknown Author'}</p>
+                                    <div style={{ height: 6, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 3, overflow: 'hidden', marginBottom: 16 }}>
+                                        <div style={{ height: '100%', background: 'var(--accent)', width: `${bookProgress}%`, borderRadius: 3 }} />
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600 }}>Page {stats.lastBook.current_page || 1}</span>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>Continue &rarr;</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ) : (
-                        <div style={{ ...styles.previewCard, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', textAlign: 'center' }} onClick={() => navigate('/reading')}>
-                            <BookOpen size={32} style={{ color: 'var(--text-faint)', marginBottom: 12 }} />
-                            <p style={{ fontSize: 14, color: 'var(--text-dim)', marginBottom: 16 }}>No active books</p>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>Browse library</span>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Quick Secretary */}
-            <div style={styles.section}>
-                <h2 style={styles.sectionTitle}>Quick Secretary</h2>
-                <div style={styles.secretaryInputWrap}>
-                    <input
-                        style={styles.secretaryInput}
-                        placeholder="Ask your secretary anything..."
-                        value={secretaryInput}
-                        onChange={e => setSecretaryInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleSecretarySubmit()}
-                    />
-                    <button onClick={() => handleSecretarySubmit()} style={styles.sendBtn}>
-                        <Send size={16} />
-                    </button>
-                </div>
-                <div style={styles.chipsRow}>
-                    {quickActions.map(a => (
-                        <button key={a} style={styles.chip} onClick={() => handleSecretarySubmit(a)}>
-                            {a}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* Health & Previews */}
-            <div style={styles.previewGrid}>
-                {stats.healthStats ? (
-                    <div style={{ ...styles.previewCard, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Activity size={20} style={{ color: 'var(--accent-green)' }} />
-                                <h3 style={styles.sectionTitle}>Health Snapshot</h3>
+                        ) : (
+                            <div style={{ padding: 40, background: 'transparent', border: '1px dashed var(--border)', borderRadius: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', cursor: 'pointer' }} onClick={() => navigate('/reading')}>
+                                <BookOpen size={28} style={{ color: 'var(--text-faint)', marginBottom: 16 }} />
+                                <p style={{ fontSize: 15, color: 'var(--text)', fontWeight: 600, marginBottom: 8 }}>No active books</p>
+                                <span style={{ fontSize: 14, color: 'var(--text-dim)' }}>Visit your library to start reading</span>
                             </div>
-                            {stats.healthStats.isOverdue && (
-                                <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--accent-amber)20', color: 'var(--accent-amber)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        )}
+                    </div>
+
+                    {/* Health Snapshot */}
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Health</h2>
+                            {stats.healthStats?.isOverdue && (
+                                <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--accent-amber)', color: '#fff', padding: '4px 10px', borderRadius: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                     Overdue
                                 </span>
                             )}
                         </div>
 
-                        {stats.healthStats.data ? (
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                                {stats.healthStats.metrics.map(m => (
-                                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg)', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: m.color }} />
-                                        <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{m.label}</span>
-                                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                                            {typeof stats.healthStats.data[m.id] === 'boolean'
-                                                ? (stats.healthStats.data[m.id] ? 'Yes' : 'No')
-                                                : stats.healthStats.data[m.id] ?? '--'}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>No check-in data yet.</p>
-                        )}
-
-                        <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 8 }}>
-                            <button onClick={() => navigate('/health')} style={{ flex: 1, padding: '8px', background: 'var(--surface-hover)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, fontWeight: 500, color: 'var(--text)', cursor: 'pointer' }}>
-                                View Dashboard
-                            </button>
-                            {stats.healthStats.isOverdue && (
-                                <button onClick={() => navigate('/health?tab=checkin')} style={{ flex: 1, padding: '8px', background: 'var(--accent-green)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                                    Check In Now
-                                </button>
+                        <div style={{ padding: 24, background: 'var(--surface)', border: '1px solid var(--border)40', borderRadius: 16, cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }} onClick={() => navigate(stats.healthStats?.isOverdue ? '/health?tab=checkin' : '/health')}>
+                            {stats.healthStats?.data ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                                    {stats.healthStats.metrics.map(m => (
+                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                <span style={{ width: 10, height: 10, borderRadius: '50%', background: m.color, boxShadow: `0 0 8px ${m.color}80` }} />
+                                                <span style={{ fontSize: 15, color: 'var(--text-dim)', fontWeight: 500 }}>{m.label}</span>
+                                            </div>
+                                            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
+                                                {typeof stats.healthStats.data[m.id] === 'boolean'
+                                                    ? (stats.healthStats.data[m.id] ? 'Yes' : 'No')
+                                                    : stats.healthStats.data[m.id] ?? '--'}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                                    <Activity size={28} style={{ color: 'var(--text-faint)', marginBottom: 16, margin: '0 auto' }} />
+                                    <p style={{ fontSize: 15, color: 'var(--text)', fontWeight: 500 }}>No check-in data</p>
+                                </div>
                             )}
                         </div>
                     </div>
-                ) : (
-                    <div style={styles.previewCard} onClick={() => navigate('/health')}>
-                        <Activity size={24} style={{ color: 'var(--accent-green)' }} />
-                        <h3 style={styles.previewTitle}>Health Tracker</h3>
-                        <p style={styles.previewDesc}>Track your weekly health check-ins</p>
-                    </div>
-                )}
 
-                {/* Vault Widget */}
-                <div style={{ ...styles.previewCard, display: 'flex', flexDirection: 'column', gap: 12 }} onClick={() => navigate('/vault')}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Lock size={20} style={{ color: 'var(--accent-purple)' }} />
-                            <h3 style={styles.sectionTitle}>Vault</h3>
-                        </div>
-                        <span style={{ fontSize: 11, background: 'var(--surface-hover)', padding: '2px 6px', borderRadius: 4, color: 'var(--text-dim)' }}>
-                            {vaultNotes.length} notes
-                        </span>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                        {vaultNotes.slice(0, 3).map(note => (
-                            <div key={note.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {note.is_pinned ? <Pin size={12} style={{ color: 'var(--accent)' }} /> : <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--text-faint)' }} />}
-                                <span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{note.title || 'Untitled'}</span>
-                                <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{new Date(note.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
-                            </div>
-                        ))}
-                        {vaultNotes.length === 0 && (
-                            <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>No notes yet. Click to create one.</p>
-                        )}
-                    </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1 }}>
-                    {/* GitHub Tile */}
-                    <div style={{ ...styles.previewCard, padding: 16 }} onClick={() => navigate('/connect')}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <Github size={16} /> <span style={{ fontSize: 13, fontWeight: 600 }}>GitHub</span>
-                        </div>
-                        {stats.services?.github?.connected ? (
-                            <div>
-                                <div style={{ fontSize: 12, color: 'var(--accent-green)', fontWeight: 600 }}>{stats.services.github.commitStreak} Day Streak 🔥</div>
-                                {stats.services.github.recentCommits?.[0] && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stats.services.github.recentCommits[0].message}</div>}
-                            </div>
-                        ) : (
-                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Connect GitHub</div>
-                        )}
-                    </div>
-
-                    {/* Spotify Tile */}
-                    <div style={{ ...styles.previewCard, padding: 16 }} onClick={() => navigate('/connect')}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <Music size={16} color="#1DB954" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Spotify</span>
-                        </div>
-                        {stats.services?.spotify?.connected ? (
-                            stats.services.spotify.currentlyPlaying ? (
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <img src={stats.services.spotify.currentlyPlaying.albumArt} style={{ width: 24, height: 24, borderRadius: 4 }} />
-                                    <div style={{ overflow: 'hidden' }}>
-                                        <div style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{stats.services.spotify.currentlyPlaying.trackName}</div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{stats.services.spotify.currentlyPlaying.artist}</div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Last: {stats.services.spotify.recentlyPlayed?.[0]?.name}</div>
-                            )
-                        ) : (
-                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Connect Spotify</div>
-                        )}
-                    </div>
-
-                    {/* Gmail Tile */}
-                    <div style={{ ...styles.previewCard, padding: 16 }} onClick={() => navigate('/connect')}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <Mail size={16} color="#EA4335" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Gmail</span>
-                        </div>
-                        {stats.services?.gmail?.connected ? (
-                            <div>
-                                <div style={{ fontSize: 12, fontWeight: 600 }}>{stats.services.gmail.unreadCount} unread</div>
-                                {stats.services.gmail.emails?.[0] && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stats.services.gmail.emails[0].subject}</div>}
-                            </div>
-                        ) : (
-                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Connect Gmail</div>
-                        )}
-                    </div>
-
-                    {/* Calendar Tile */}
-                    <div style={{ ...styles.previewCard, padding: 16 }} onClick={() => navigate('/connect')}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <CalendarIcon size={16} color="#4285F4" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Calendar</span>
-                        </div>
-                        {stats.services?.calendar?.connected ? (
-                            stats.services.calendar.nextEvent ? (
-                                <div>
-                                    <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>{new Date(stats.services.calendar.nextEvent.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                                    <div style={{ fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stats.services.calendar.nextEvent.title}</div>
-                                </div>
-                            ) : (
-                                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>No events today</div>
-                            )
-                        ) : (
-                            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Connect Calendar</div>
-                        )}
-                    </div>
                 </div>
             </div>
+
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                .hover-opacity-100:hover { opacity: 1 !important; }
+            `}} />
         </div>
     )
-}
-
-const styles = {
-    page: {
-        padding: '32px 40px',
-        maxWidth: 960,
-        animation: 'fadeUp 0.3s ease',
-    },
-    header: {
-        marginBottom: 32,
-    },
-    greeting: {
-        fontSize: 28,
-        fontWeight: 600,
-        letterSpacing: '-0.02em',
-        color: 'var(--text)',
-        marginBottom: 4,
-    },
-    date: {
-        fontSize: 14,
-        color: 'var(--text-dim)',
-    },
-    statsGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: 12,
-        marginBottom: 32,
-    },
-    statCard: {
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: '18px 20px',
-        transition: 'border-color 0.15s ease',
-    },
-    section: {
-        marginBottom: 32,
-    },
-    sectionTitle: {
-        fontSize: 16,
-        fontWeight: 600,
-        color: 'var(--text)',
-        letterSpacing: '-0.01em',
-    },
-    taskItem: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '12px 16px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        transition: 'border-color 0.15s ease',
-    },
-    checkbox: {
-        background: 'none',
-        border: 'none',
-        cursor: 'pointer',
-        padding: 0,
-        display: 'flex',
-        alignItems: 'center',
-        opacity: 0.6,
-        transition: 'opacity 0.15s ease',
-    },
-    addTaskForm: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        padding: 16,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        marginTop: 8,
-    },
-    input: {
-        padding: '10px 12px',
-        background: 'var(--bg)',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        fontSize: 14,
-        color: 'var(--text)',
-        outline: 'none',
-        width: '100%',
-    },
-    saveBtn: {
-        padding: '10px 20px',
-        background: 'var(--accent)',
-        color: '#fff',
-        border: 'none',
-        borderRadius: 8,
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: 'pointer',
-        whiteSpace: 'nowrap',
-    },
-    cancelBtn: {
-        padding: '10px 16px',
-        background: 'transparent',
-        color: 'var(--text-dim)',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        fontSize: 13,
-        cursor: 'pointer',
-        whiteSpace: 'nowrap',
-    },
-    addTaskBtn: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 16px',
-        background: 'transparent',
-        border: '1px dashed var(--border)',
-        borderRadius: 10,
-        color: 'var(--text-dim)',
-        fontSize: 13,
-        fontWeight: 500,
-        cursor: 'pointer',
-        marginTop: 8,
-        transition: 'all 0.15s ease',
-        width: '100%',
-    },
-    secretaryInputWrap: {
-        display: 'flex',
-        gap: 8,
-        marginTop: 12,
-    },
-    secretaryInput: {
-        flex: 1,
-        padding: '12px 16px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        fontSize: 14,
-        color: 'var(--text)',
-        outline: 'none',
-    },
-    sendBtn: {
-        padding: '12px 16px',
-        background: 'var(--accent)',
-        border: 'none',
-        borderRadius: 10,
-        color: '#fff',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-    },
-    chipsRow: {
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 8,
-        marginTop: 12,
-    },
-    chip: {
-        padding: '8px 14px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 20,
-        fontSize: 13,
-        color: 'var(--text-dim)',
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-        whiteSpace: 'nowrap',
-    },
-    previewGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: 12,
-        marginBottom: 32,
-    },
-    previewCard: {
-        padding: '24px 20px',
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-    },
-    previewTitle: {
-        fontSize: 15,
-        fontWeight: 600,
-        color: 'var(--text)',
-        marginTop: 12,
-        marginBottom: 6,
-    },
-    previewDesc: {
-        fontSize: 13,
-        color: 'var(--text-dim)',
-        lineHeight: 1.4,
-    },
 }

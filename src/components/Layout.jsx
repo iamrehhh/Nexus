@@ -9,6 +9,7 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 import { useCommandBar } from '../hooks/useCommandBar'
+import SpotifyPlayer from './SpotifyPlayer'
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -181,6 +182,60 @@ export default function Layout({ children }) {
         };
 
         generateNotifications();
+
+        // 5. Supabase Realtime Subscription for Reminders
+        const channel = supabase.channel('reminders-notifs')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'reminders',
+                filter: `user_id=eq.${user.uid}`
+            }, (payload) => {
+                const newReminder = payload.new;
+                // Schedule local notification if supported
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    const notifyTime = new Date(newReminder.due_date).getTime();
+                    const now = Date.now();
+                    const timeUntil = notifyTime - now;
+
+                    if (timeUntil > 0 && timeUntil <= 24 * 60 * 60 * 1000) {
+                        // Schedule a setTimeout for the notification if it's within 24 hours
+                        setTimeout(() => {
+                            new Notification("Secretary Reminder", {
+                                body: newReminder.title + (newReminder.description ? `\n${newReminder.description}` : ''),
+                                icon: '/favicon.ico'
+                            });
+                        }, timeUntil);
+                    }
+                }
+
+                // Add to internal layout notifications with standard format
+                setNotifications(prev => {
+                    const newNotif = {
+                        id: crypto.randomUUID(),
+                        title: 'New Reminder Set',
+                        message: `${newReminder.title} (Due: ${new Date(newReminder.due_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+                        url: '/secretary',
+                        iconType: 'info',
+                        timestamp: Date.now(),
+                        read: false
+                    };
+                    const updated = [newNotif, ...prev].slice(0, 20);
+                    setUnreadCount(updated.filter(n => !n.read).length);
+                    localStorage.setItem('nexus_notifications', JSON.stringify(updated));
+                    return updated;
+                });
+            })
+            .subscribe();
+
+        // Request Browser Notification Permission on mount
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [user]);
 
     const markAllRead = () => {
@@ -427,6 +482,9 @@ export default function Layout({ children }) {
                     </div>
                 </>
             )}
+
+            {/* Spotify Player */}
+            <SpotifyPlayer />
 
             {/* Floating Action Button */}
             <div ref={fabRef} style={{

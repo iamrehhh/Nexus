@@ -11,21 +11,10 @@ import {
     Lock, Folder, Search, Pin, Archive, Plus, MoreVertical,
     Bookmark, Palette, Download, Upload, X, Check, Bold, Italic,
     Underline, Strikethrough, Code, Link as LinkIcon, Heading1, Heading2,
-    List, ListOrdered, Quote, HelpCircle, ChevronLeft, Menu, Minus
+    List, ListOrdered, Quote, HelpCircle, ChevronLeft, Menu, Minus, Trash2
 } from 'lucide-react'
 
-const FOLDER_COLORS = ['#6366f1', '#f59e0b', '#3b82f6', '#10b981', '#a855f7', '#ef4444', '#14b8a6', '#f43f5e']
-
-const NOTE_COLORS = {
-    default: { bg: 'transparent', card: 'var(--surface)' },
-    yellow: { bg: '#fef9c3', card: '#fef08a' },
-    green: { bg: '#dcfce7', card: '#bbf7d0' },
-    blue: { bg: '#dbeafe', card: '#bfdbfe' },
-    purple: { bg: '#f3e8ff', card: '#e9d5ff' },
-    red: { bg: '#fee2e2', card: '#fecaca' },
-    orange: { bg: '#ffedd5', card: '#fed7aa' },
-    pink: { bg: '#fce7f3', card: '#fbcfe8' },
-}
+// NOTE_COLORS and FOLDER_COLORS are no longer needed for new clean look
 
 export default function Vault() {
     const { user } = useAuth()
@@ -169,12 +158,8 @@ export default function Vault() {
             id: selectedNote.id,
             title,
             content,
-            word_count: wordCount,
-            tags: selectedNote.tags || [],
-            folder: selectedNote.folder,
-            color: selectedNote.color || 'default',
-            is_pinned: selectedNote.is_pinned || false,
-            is_archived: selectedNote.is_archived || false
+            folder_id: selectedNote.folder_id || null,
+            is_pinned: selectedNote.is_pinned || false
         }
 
         try {
@@ -201,16 +186,13 @@ export default function Vault() {
     }
 
     const handleCreateNote = async () => {
-        const folderName = (currentView.id !== 'All Notes' && currentView.id !== 'Pinned' && currentView.id !== 'Archived') ? currentView.name : 'General'
+        const folderId = (currentView.id !== 'All Notes' && currentView.id !== 'Pinned' && currentView.id !== 'Archived') ? currentView.id : null
         try {
             const newNote = await saveVaultNote(user.uid, {
                 title: '',
                 content: '',
-                folder: folderName,
-                is_pinned: currentView.id === 'Pinned',
-                is_archived: false,
-                color: 'default',
-                tags: []
+                folder_id: folderId,
+                is_pinned: currentView.id === 'Pinned'
             })
             setNotes([newNote, ...notes])
             setSelectedNote(newNote)
@@ -338,11 +320,8 @@ export default function Vault() {
                 await saveVaultNote(user.uid, {
                     title: name,
                     content: text.replace(/\n/g, '<br>'),
-                    folder: 'General',
-                    is_pinned: false,
-                    is_archived: false,
-                    color: 'default',
-                    tags: []
+                    folder_id: null,
+                    is_pinned: false
                 })
                 successCount++
             } catch (err) { console.error('Import err', err) }
@@ -421,15 +400,19 @@ export default function Vault() {
                         <div style={styles.divider} />
 
                         {folders.map(f => (
-                            <FolderItem
-                                key={f.id}
-                                icon={Folder}
-                                iconColor={f.color}
-                                label={f.name}
-                                count={f.note_count}
-                                active={currentView.id === f.name}
-                                onClick={() => { setCurrentView({ id: f.name, name: f.name }); if (isMobile) setMobileView('middle') }}
-                            />
+                            <div key={f.id} style={{ display: 'flex', alignItems: 'center' }}>
+                                <FolderItem
+                                    icon={Folder}
+                                    iconColor={f.color}
+                                    label={f.name}
+                                    count={f.note_count}
+                                    active={currentView.id === f.id}
+                                    onClick={() => { setCurrentView({ id: f.id, name: f.name }); if (isMobile) setMobileView('middle') }}
+                                />
+                                <button onClick={(e) => { e.stopPropagation(); deleteVaultFolder(user.uid, f.id, f.name, false).then(loadInitialData) }} style={{ ...styles.iconBtn, opacity: 0.5, marginLeft: 'auto' }}>
+                                    <Trash2 size={12} />
+                                </button>
+                            </div>
                         ))}
 
                         {showNewFolder ? (
@@ -502,7 +485,7 @@ export default function Vault() {
                                 key={note.id}
                                 style={{
                                     ...styles.noteItem,
-                                    background: selectedNote?.id === note.id ? 'var(--surface-hover)' : NOTE_COLORS[note.color || 'default'].card,
+                                    background: selectedNote?.id === note.id ? 'var(--surface-hover)' : 'var(--surface)',
                                     border: selectedNote?.id === note.id ? '1px solid var(--accent)' : '1px solid var(--border)'
                                 }}
                                 onClick={() => {
@@ -524,10 +507,8 @@ export default function Vault() {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ display: 'flex', gap: 4 }}>
                                         {currentView.id === 'All Notes' && (
-                                            <span style={styles.badge}>{note.folder}</span>
+                                            <span style={styles.badge}>{note.folder || 'Uncategorized'}</span>
                                         )}
-                                        {note.tags?.slice(0, 2).map(t => <span key={t} style={styles.badge}>#{t}</span>)}
-                                        {note.tags?.length > 2 && <span style={styles.badge}>+{note.tags.length - 2}</span>}
                                     </div>
                                     <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
                                         {new Date(note.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
@@ -542,7 +523,7 @@ export default function Vault() {
     )
 
     const renderEditor = () => (
-        <div style={{ ...styles.column, ...styles.rightColumn, background: selectedNote ? NOTE_COLORS[selectedNote.color || 'default'].bg : 'var(--bg)', display: (!isMobile || mobileView === 'right') ? 'flex' : 'none' }}>
+        <div style={{ ...styles.column, ...styles.rightColumn, background: 'var(--bg)', display: (!isMobile || mobileView === 'right') ? 'flex' : 'none' }}>
             {!selectedNote ? (
                 <div style={styles.emptyEditor}>
                     <Lock size={32} style={{ color: 'var(--text-faint)', marginBottom: 16 }} />
@@ -578,34 +559,11 @@ export default function Vault() {
                                 data-placeholder="Note title..."
                             />
 
-                            {/* Tags */}
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 24, alignItems: 'center' }}>
-                                {selectedNote.tags?.map(t => (
-                                    <span key={t} style={styles.tagPill}>
-                                        {t} <button onClick={() => {
-                                            setSelectedNote(p => ({ ...p, tags: p.tags.filter(x => x !== t) }));
-                                            handleNoteChange()
-                                        }} style={styles.tagRemove}><X size={10} /></button>
-                                    </span>
-                                ))}
-                                {(!selectedNote.tags || selectedNote.tags.length < 10) && (
-                                    <input
-                                        value={newTag}
-                                        onChange={e => setNewTag(e.target.value)}
-                                        onKeyDown={e => {
-                                            if (e.key === 'Enter' && newTag.trim()) {
-                                                e.preventDefault()
-                                                if (!selectedNote.tags?.includes(newTag.trim())) {
-                                                    setSelectedNote(p => ({ ...p, tags: [...(p.tags || []), newTag.trim()] }))
-                                                    handleNoteChange()
-                                                }
-                                                setNewTag('')
-                                            }
-                                        }}
-                                        placeholder="Add tag..."
-                                        style={styles.tagInput}
-                                    />
-                                )}
+                                <span style={styles.tagPill}>
+                                    <Folder size={12} style={{ marginRight: 4 }} />
+                                    {selectedNote.folder || 'Uncategorized'}
+                                </span>
                             </div>
 
                             {/* Toolbar */}
@@ -639,19 +597,7 @@ export default function Vault() {
                     </div>
 
                     <div style={styles.editorBottomBar}>
-                        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{selectedNote.word_count || 0} words</span>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                            {Object.keys(NOTE_COLORS).map(colorKey => (
-                                <button
-                                    key={colorKey}
-                                    onClick={() => { setSelectedNote(p => ({ ...p, color: colorKey })); handleNoteChange() }}
-                                    style={{
-                                        width: 16, height: 16, borderRadius: '50%', border: selectedNote.color === colorKey ? '2px solid var(--text)' : '1px solid var(--border)',
-                                        background: NOTE_COLORS[colorKey].card
-                                    }}
-                                />
-                            ))}
-                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{editorRef.current?.innerText.trim().split(/\s+/).filter(w => w.length > 0).length || 0} words</span>
                     </div>
                 </>
             )}

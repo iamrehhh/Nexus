@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { loadSecretaryMessages, saveSecretaryMessage } from '../lib/db'
-import { Bot, Send } from 'lucide-react'
+import { loadSecretaryMessages, saveSecretaryMessage, loadUpcomingReminders, completeReminder, deleteReminder } from '../lib/db'
+import { Bot, Send, Bell, CheckCircle, Trash2, Calendar as CalendarIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Secretary() {
     const { user } = useAuth()
     const location = useLocation()
     const [messages, setMessages] = useState([])
+    const [reminders, setReminders] = useState([])
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(true)
     const [sending, setSending] = useState(false)
@@ -19,7 +20,7 @@ export default function Secretary() {
     const firstName = user?.displayName?.split(' ')[0] || 'User'
 
     useEffect(() => {
-        if (user) loadMessages()
+        if (user) loadData()
     }, [user])
 
     // Handle prefill from dashboard
@@ -30,12 +31,16 @@ export default function Secretary() {
         }
     }, [location.state, loading])
 
-    const loadMessages = async () => {
+    const loadData = async () => {
         try {
-            const msgs = await loadSecretaryMessages(user.uid)
+            const [msgs, rems] = await Promise.all([
+                loadSecretaryMessages(user.uid),
+                loadUpcomingReminders(user.uid)
+            ])
             setMessages(msgs)
+            setReminders(rems)
         } catch (err) {
-            console.error('Failed to load messages:', err)
+            console.error('Failed to load data:', err)
         } finally {
             setLoading(false)
         }
@@ -83,6 +88,12 @@ export default function Secretary() {
 
             const assistantMsg = { id: Date.now() + 1, role: 'assistant', content: data.reply, created_at: new Date().toISOString() }
             setMessages(prev => [...prev, assistantMsg])
+
+            // Check if any reminders were scheduled (reload Reminders just in case)
+            if (data.reply && data.reply.toLowerCase().includes('reminder')) {
+                loadUpcomingReminders(user.uid).then(setReminders)
+            }
+
         } catch (err) {
             console.error('Secretary error:', err)
             toast.error('Failed to get response')
@@ -110,16 +121,45 @@ export default function Secretary() {
         }
     }
 
+    const handleCompleteReminder = async (id) => {
+        try {
+            await completeReminder(id)
+            setReminders(prev => prev.filter(r => r.id !== id))
+            toast.success('Reminder completed')
+        } catch (e) { toast.error('Failed to complete') }
+    }
+
+    const handleDeleteReminder = async (id) => {
+        try {
+            await deleteReminder(id)
+            setReminders(prev => prev.filter(r => r.id !== id))
+            toast.success('Reminder deleted')
+        } catch (e) { toast.error('Failed to delete') }
+    }
+
     const quickActions = [
+        'Remind me to call Mom tomorrow at 6pm',
         'Plan my week',
         'What do I have today?',
-        'Help me prioritize',
         'Add a task for me',
-        'What have I told you before?',
     ]
 
     const formatTime = (ts) => {
         return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    }
+
+    const formatReminderDate = (isoStr) => {
+        const d = new Date(isoStr)
+        const today = new Date()
+        const tmrw = new Date(today)
+        tmrw.setDate(tmrw.getDate() + 1)
+
+        let prefix = ''
+        if (d.toDateString() === today.toDateString()) prefix = 'Today, '
+        else if (d.toDateString() === tmrw.toDateString()) prefix = 'Tomorrow, '
+        else prefix = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', '
+
+        return prefix + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     }
 
     const showQuickActions = messages.length === 0 || (!input && !sending)
@@ -145,79 +185,129 @@ export default function Secretary() {
                 </div>
             </div>
 
-            {/* Chat Area */}
-            <div style={styles.chatArea}>
-                {messages.length === 0 && (
-                    <div style={styles.emptyState}>
-                        <Bot size={40} style={{ color: 'var(--text-faint)', marginBottom: 12 }} />
-                        <p style={{ fontSize: 15, color: 'var(--text-dim)', marginBottom: 4 }}>No messages yet</p>
-                        <p style={{ fontSize: 13, color: 'var(--text-faint)' }}>Start a conversation with your secretary</p>
-                    </div>
-                )}
+            {/* Main Content Area */}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-                {messages.map((msg, i) => (
-                    <div key={msg.id || i} style={{
-                        ...styles.messageRow,
-                        justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                        animation: 'fadeUp 0.25s ease',
-                    }}>
-                        <div style={{
-                            ...styles.messageBubble,
-                            ...(msg.role === 'user' ? styles.userBubble : styles.assistantBubble),
-                        }}>
-                            <p style={styles.messageText}>{msg.content}</p>
-                            <span style={styles.messageTime}>{formatTime(msg.created_at)}</span>
-                        </div>
-                    </div>
-                ))}
-
-                {sending && (
-                    <div style={{ ...styles.messageRow, justifyContent: 'flex-start', animation: 'fadeUp 0.25s ease' }}>
-                        <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
-                            <div style={styles.typingIndicator}>
-                                <span style={{ ...styles.dot, animationDelay: '0s' }} />
-                                <span style={{ ...styles.dot, animationDelay: '0.15s' }} />
-                                <span style={{ ...styles.dot, animationDelay: '0.3s' }} />
+                {/* Chat Column */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={styles.chatArea}>
+                        {messages.length === 0 && (
+                            <div style={styles.emptyState}>
+                                <Bot size={40} style={{ color: 'var(--text-faint)', marginBottom: 12 }} />
+                                <p style={{ fontSize: 15, color: 'var(--text-dim)', marginBottom: 4 }}>No messages yet</p>
+                                <p style={{ fontSize: 13, color: 'var(--text-faint)' }}>Start a conversation with your secretary</p>
                             </div>
+                        )}
+
+                        {messages.map((msg, i) => (
+                            <div key={msg.id || i} style={{
+                                ...styles.messageRow,
+                                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                animation: 'fadeUp 0.25s ease',
+                            }}>
+                                <div style={{
+                                    ...styles.messageBubble,
+                                    ...(msg.role === 'user' ? styles.userBubble : styles.assistantBubble),
+                                }}>
+                                    <p style={styles.messageText}>{msg.content}</p>
+                                    <span style={styles.messageTime}>{formatTime(msg.created_at)}</span>
+                                </div>
+                            </div>
+                        ))}
+
+                        {sending && (
+                            <div style={{ ...styles.messageRow, justifyContent: 'flex-start', animation: 'fadeUp 0.25s ease' }}>
+                                <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
+                                    <div style={styles.typingIndicator}>
+                                        <span style={{ ...styles.dot, animationDelay: '0s' }} />
+                                        <span style={{ ...styles.dot, animationDelay: '0.15s' }} />
+                                        <span style={{ ...styles.dot, animationDelay: '0.3s' }} />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Input Area */}
+                    <div style={styles.inputArea}>
+                        {showQuickActions && messages.length === 0 && (
+                            <div style={styles.chipsRow}>
+                                {quickActions.map(a => (
+                                    <button key={a} style={styles.chip} onClick={() => sendMessage(a)}>
+                                        {a}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div style={styles.inputRow}>
+                            <textarea
+                                ref={textareaRef}
+                                style={styles.textarea}
+                                placeholder="Message your secretary..."
+                                value={input}
+                                onChange={handleTextareaInput}
+                                onKeyDown={handleKeyDown}
+                                rows={1}
+                            />
+                            <button
+                                onClick={() => sendMessage()}
+                                disabled={!input.trim() || sending}
+                                style={{
+                                    ...styles.sendBtn,
+                                    opacity: (!input.trim() || sending) ? 0.5 : 1,
+                                }}
+                            >
+                                <Send size={18} />
+                            </button>
                         </div>
                     </div>
-                )}
-
-                <div ref={chatEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <div style={styles.inputArea}>
-                {showQuickActions && messages.length === 0 && (
-                    <div style={styles.chipsRow}>
-                        {quickActions.map(a => (
-                            <button key={a} style={styles.chip} onClick={() => sendMessage(a)}>
-                                {a}
-                            </button>
-                        ))}
-                    </div>
-                )}
-                <div style={styles.inputRow}>
-                    <textarea
-                        ref={textareaRef}
-                        style={styles.textarea}
-                        placeholder="Message your secretary..."
-                        value={input}
-                        onChange={handleTextareaInput}
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                    />
-                    <button
-                        onClick={() => sendMessage()}
-                        disabled={!input.trim() || sending}
-                        style={{
-                            ...styles.sendBtn,
-                            opacity: (!input.trim() || sending) ? 0.5 : 1,
-                        }}
-                    >
-                        <Send size={18} />
-                    </button>
                 </div>
+
+                {/* Right Side Panel: Reminders */}
+                <div style={styles.remindersPanel}>
+                    <div style={styles.remindersHeader}>
+                        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Upcoming Reminders</h2>
+                        <span style={{ fontSize: 12, color: 'var(--text-dim)', background: 'var(--surface-hover)', padding: '2px 8px', borderRadius: 12 }}>
+                            {reminders.length}
+                        </span>
+                    </div>
+
+                    <div style={styles.remindersList}>
+                        {reminders.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-dim)' }}>
+                                <Bell size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                                <p style={{ fontSize: 13 }}>No upcoming reminders</p>
+                                <p style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Ask your secretary to remind you about something.</p>
+                            </div>
+                        ) : (
+                            reminders.map(rem => (
+                                <div key={rem.id} style={styles.reminderCard}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                        <h3 style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', margin: 0 }}>{rem.title}</h3>
+                                        <div style={{ display: 'flex', gap: 4 }}>
+                                            <button onClick={() => handleCompleteReminder(rem.id)} style={{ ...styles.iconBtn, color: 'var(--accent-green)' }}>
+                                                <CheckCircle size={16} />
+                                            </button>
+                                            <button onClick={() => handleDeleteReminder(rem.id)} style={{ ...styles.iconBtn, color: 'var(--text-faint)' }}>
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {rem.description && (
+                                        <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 8, lineHeight: 1.4 }}>{rem.description}</p>
+                                    )}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent)', fontSize: 12, fontWeight: 500 }}>
+                                        <CalendarIcon size={12} />
+                                        <span>{formatReminderDate(rem.due_date)}</span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
             </div>
         </div>
     )
@@ -363,4 +453,45 @@ const styles = {
         transition: 'opacity 0.15s ease',
         flexShrink: 0,
     },
+    remindersPanel: {
+        width: 340,
+        borderLeft: '1px solid var(--border)',
+        background: 'var(--surface)',
+        display: 'flex',
+        flexDirection: 'column',
+    },
+    remindersHeader: {
+        padding: '20px 24px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: 'var(--bg)',
+    },
+    remindersList: {
+        flex: 1,
+        overflowY: 'auto',
+        padding: 24,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+    },
+    reminderCard: {
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        padding: 16,
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+    },
+    iconBtn: {
+        background: 'none',
+        border: 'none',
+        padding: 4,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 4,
+        transition: 'background 0.15s ease',
+    }
 }
