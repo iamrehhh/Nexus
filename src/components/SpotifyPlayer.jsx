@@ -73,15 +73,15 @@ export default function SpotifyPlayer() {
         );
     }
 
-    if (!playback) return null;
+    // Removed: if (!playback) return null; (Player should persist in idle state)
 
-    const trackName = playback.item?.name || 'Unknown Track';
-    const artistName = playback.item?.artists?.map(a => a.name).join(', ') || 'Unknown Artist';
-    const albumArt = playback.item?.album?.images?.[0]?.url;
-    const isPlaying = playback.is_playing;
-    const progress = playback.progress_ms || 0;
-    const duration = playback.item?.duration_ms || 1;
-    const progressPct = (progress / duration) * 100;
+    const trackName = playback?.item?.name || 'Spotify Idle';
+    const artistName = playback?.item?.artists?.map(a => a.name).join(', ') || 'Open Spotify on a device to play';
+    const albumArt = playback?.item?.album?.images?.[0]?.url;
+    const isPlaying = playback?.is_playing || false;
+    const progress = playback?.progress_ms || 0;
+    const duration = playback?.item?.duration_ms || 1;
+    const progressPct = playback ? (progress / duration) * 100 : 0;
 
     if (expanded) {
         return (
