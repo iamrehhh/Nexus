@@ -588,20 +588,6 @@ function UploadModal({ user, onClose, onSuccess }) {
                         )}
                     </div>
                 )}
-                                <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                                    <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.3s ease' }} />
-                                </div>
-                            )}
-                        </div>
-                        <p style={{ fontSize: 15, fontWeight: 500, color: 'var(--text)' }}>{statusText}</p>
-                        {uploadState === 'processing' && (
-                            <button onClick={() => onClose()} style={{ ...styles.addBtn, marginTop: 24, margin: '24px auto 0' }}>
-                                View in Library
-                            </button>
-                        )}
-                    </div>
-                )}
-
 
                 {/* Fields */}
                 {(uploadState === 'idle' || uploadState === 'error') && (
