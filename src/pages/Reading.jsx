@@ -519,26 +519,6 @@ function UploadModal({ user, onClose, onSuccess }) {
         }
     }
 
-    const handleFile = (f) => {
-        if (!f || !f.name.endsWith('.pdf')) {
-            setErrorText('Only PDF files are accepted')
-            return
-        }
-        if (f.size > 100 * 1024 * 1024) { // Increased to 100MB per specs
-            setErrorText('File too large. Maximum 100MB.')
-            return
-        }
-        setFile(f)
-        setErrorText('')
-        if (!title) setTitle(f.name.replace('.pdf', ''))
-    }
-
-    const handleDrop = (e) => {
-        e.preventDefault()
-        const f = e.dataTransfer.files[0]
-        if (f) handleFile(f)
-    }
-
     return (
         <div style={styles.modalOverlay} onClick={() => uploadState !== 'uploading' && uploadState !== 'extracting' && uploadState !== 'saving' ? onClose() : null}>
             <div style={styles.modal} onClick={e => e.stopPropagation()}>
