@@ -1,6 +1,5 @@
 // api/spotify-control.js
-import { authenticateUser } from './auth.js';
-import { getSpotifyClient } from './services.js';
+import { getSpotifyClient } from './spotify-helper.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
