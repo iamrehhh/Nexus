@@ -13,10 +13,12 @@ export default function SpotifyPlayer() {
 
     const fetchPlayback = async () => {
         try {
-            const res = await fetch(`/api/spotify-current?userId=${user?.uid}`);
+            const res = await fetch(`/api/spotify?userId=${user.uid}`);
             if (res.ok) {
                 const data = await res.json();
                 setPlayback(data.playback);
+            } else {
+                setPlayback(null);
             }
         } catch (e) {
             console.error('Failed to fetch playback state', e);
@@ -40,7 +42,7 @@ export default function SpotifyPlayer() {
         }
 
         try {
-            const res = await fetch('/api/spotify-control', {
+            const res = await fetch('/api/spotify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: user?.uid, action })
