@@ -117,10 +117,10 @@ export default function Vault() {
         setIsSearching(true)
         searchTimeout.current = setTimeout(async () => {
             try {
-                const res = await fetch('/api/vault-search', {
+                const res = await fetch('/api/vault', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: searchQuery, userId: user.uid, mode: 'both' })
+                    body: JSON.stringify({ action: 'search', query: searchQuery, userId: user.uid, mode: 'both' })
                 })
                 const data = await res.json()
                 setSearchResults(data.results || [])
@@ -167,10 +167,10 @@ export default function Vault() {
             setSelectedNote(prev => ({ ...prev, updated_at: savedNote.updated_at }))
 
             // Background embedding
-            fetch('/api/vault-embed', {
+            fetch('/api/vault', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ noteId: savedNote.id, userId: user.uid, title, content })
+                body: JSON.stringify({ action: 'embed', noteId: savedNote.id, userId: user.uid, title, content })
             }).catch(e => console.error('Embed failed', e))
 
             // Update in list
